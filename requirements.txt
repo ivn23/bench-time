@@ -1,0 +1,12 @@
+numpy
+pandas
+polars
+scikit-learn
+xgboost
+optuna
+joblib
+mlflow
+sqlalchemy
+psycopg2-binary
+lets-plot
+pyarrow
