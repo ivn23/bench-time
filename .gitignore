@@ -55,3 +55,6 @@ Thumbs.db
 
 # Claude files
 CLAUDE.md
+
+# Prompt files
+prompts/
