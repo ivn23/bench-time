@@ -58,3 +58,12 @@ CLAUDE.md
 
 # Prompt files
 prompts/
+context/
+code_diagrams/
+implement/
+
+# test notebooks
+src/load_data.ipynb
+
+src/test_code.ipynb
+src/test_pipeline.ipynb

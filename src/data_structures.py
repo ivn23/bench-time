@@ -17,6 +17,7 @@ class GranularityLevel(Enum):
     SKU = "sku"          # Individual product at specific store
     PRODUCT = "product"   # Same product across multiple stores
     STORE = "store"      # All products within specific store
+    GLOBAL = "global"      # All products across all stores
 
 
 @dataclass
