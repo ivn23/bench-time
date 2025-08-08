@@ -1,15 +1,14 @@
 """
-Model training module with Optuna hyperparameter optimization.
+Model training module with fixed hyperparameters.
 Supports XGBoost and extensible to other algorithms.
 """
 
 import xgboost as xgb
-import optuna
 import numpy as np
 import polars as pl
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
-from typing import Dict, Any, List, Tuple, Optional, Callable
+from typing import Dict, Any, List, Tuple, Optional
 import logging
 
 from .data_structures import (
@@ -21,13 +20,10 @@ logger = logging.getLogger(__name__)
 
 
 class ModelTrainer:
-    """Model training with hyperparameter optimization."""
+    """Model training with fixed hyperparameters."""
     
     def __init__(self, training_config: TrainingConfig):
         self.config = training_config
-        self.model_factories = {
-            "xgboost": self._create_xgboost_objective
-        }
     
     def train_model(self,
                    X_train: pl.DataFrame,
@@ -39,7 +35,7 @@ class ModelTrainer:
                    granularity: GranularityLevel,
                    entity_ids: Dict[str, Any]) -> BenchmarkModel:
         """
-        Train a model with hyperparameter optimization.
+        Train a model with fixed hyperparameters.
         
         Args:
             X_train, y_train: Training data
@@ -60,24 +56,18 @@ class ModelTrainer:
         X_val_np = X_val.select(feature_cols).to_numpy()
         y_val_np = y_val.select(target_col).to_numpy().flatten()
         
-        # Hyperparameter optimization
-        if self.config.model_type not in self.model_factories:
-            raise ValueError(f"Unknown model type: {self.config.model_type}")
+        # Get hyperparameters from config
+        hyperparameters = self.config.hyperparameters.copy()
+        # Merge with any additional model_params
+        hyperparameters.update(self.config.model_params)
+        # Ensure random_state is set
+        hyperparameters['random_state'] = self.config.random_state
         
-        objective_func = self.model_factories[self.config.model_type](
-            X_train_np, y_train_np, X_val_np, y_val_np
-        )
+        logger.info(f"Using hyperparameters: {hyperparameters}")
         
-        study = optuna.create_study(direction='minimize')
-        study.optimize(objective_func, n_trials=self.config.n_trials)
-        
-        best_params = study.best_params
-        logger.info(f"Best parameters: {best_params}")
-        logger.info(f"Best validation MSE: {study.best_value:.4f}")
-        
-        # Train final model with best parameters
-        final_model = self._train_final_model(
-            X_train_np, y_train_np, best_params, self.config.model_type
+        # Train model with fixed hyperparameters
+        final_model = self._train_model_with_params(
+            X_train_np, y_train_np, hyperparameters, self.config.model_type
         )
         
         # Evaluate on validation set
@@ -92,7 +82,7 @@ class ModelTrainer:
             granularity=granularity,
             entity_ids=entity_ids,
             model_type=self.config.model_type,
-            hyperparameters=best_params,
+            hyperparameters=hyperparameters,
             training_config=self.config.__dict__,
             performance_metrics=metrics,
             feature_columns=feature_cols,
@@ -127,7 +117,7 @@ class ModelTrainer:
                                    granularity: GranularityLevel,
                                    entity_ids: Dict[str, Any]) -> BenchmarkModel:
         """
-        Train model using time series cross-validation.
+        Train model using time series cross-validation for evaluation.
         
         Args:
             X, y: Full dataset
@@ -145,40 +135,37 @@ class ModelTrainer:
         X_np = X.select(feature_cols).to_numpy()
         y_np = y.select(target_col).to_numpy().flatten()
         
-        # Time series cross-validation
+        # Get hyperparameters from config
+        hyperparameters = self.config.hyperparameters.copy()
+        hyperparameters.update(self.config.model_params)
+        hyperparameters['random_state'] = self.config.random_state
+        
+        logger.info(f"Using hyperparameters: {hyperparameters}")
+        
+        # Time series cross-validation for performance estimation
         tscv = TimeSeriesSplit(n_splits=self.config.cv_folds)
         cv_scores = []
         
-        if self.config.model_type not in self.model_factories:
-            raise ValueError(f"Unknown model type: {self.config.model_type}")
-        
-        # Run hyperparameter optimization with CV
-        def cv_objective(trial):
-            params = self._suggest_hyperparameters(trial, self.config.model_type)
-            fold_scores = []
+        for train_idx, val_idx in tscv.split(X_np):
+            X_fold_train, X_fold_val = X_np[train_idx], X_np[val_idx]
+            y_fold_train, y_fold_val = y_np[train_idx], y_np[val_idx]
             
-            for train_idx, val_idx in tscv.split(X_np):
-                X_fold_train, X_fold_val = X_np[train_idx], X_np[val_idx]
-                y_fold_train, y_fold_val = y_np[train_idx], y_np[val_idx]
-                
-                model = self._train_final_model(X_fold_train, y_fold_train, params, self.config.model_type)
-                predictions = model.predict(X_fold_val)
-                predictions = np.round(predictions).astype(int)
-                
-                mse = mean_squared_error(y_fold_val, predictions)
-                fold_scores.append(mse)
+            model = self._train_model_with_params(
+                X_fold_train, y_fold_train, hyperparameters, self.config.model_type
+            )
+            predictions = model.predict(X_fold_val)
+            predictions = np.round(predictions).astype(int)
             
-            return np.mean(fold_scores)
+            mse = mean_squared_error(y_fold_val, predictions)
+            cv_scores.append(mse)
         
-        study = optuna.create_study(direction='minimize')
-        study.optimize(cv_objective, n_trials=self.config.n_trials)
-        
-        best_params = study.best_params
-        logger.info(f"Best CV parameters: {best_params}")
-        logger.info(f"Best CV MSE: {study.best_value:.4f}")
+        cv_mse = np.mean(cv_scores)
+        logger.info(f"CV MSE: {cv_mse:.4f}")
         
         # Train final model on full dataset
-        final_model = self._train_final_model(X_np, y_np, best_params, self.config.model_type)
+        final_model = self._train_model_with_params(
+            X_np, y_np, hyperparameters, self.config.model_type
+        )
         
         # Create model metadata
         metadata = ModelMetadata(
@@ -186,9 +173,9 @@ class ModelTrainer:
             granularity=granularity,
             entity_ids=entity_ids,
             model_type=self.config.model_type,
-            hyperparameters=best_params,
+            hyperparameters=hyperparameters,
             training_config=self.config.__dict__,
-            performance_metrics={"cv_mse": study.best_value},
+            performance_metrics={"cv_mse": cv_mse},
             feature_columns=feature_cols,
             target_column=target_col
         )
@@ -208,57 +195,9 @@ class ModelTrainer:
         
         return benchmark_model
     
-    def _create_xgboost_objective(self, X_train: np.ndarray, y_train: np.ndarray,
-                                 X_val: np.ndarray, y_val: np.ndarray) -> Callable:
-        """Create Optuna objective function for XGBoost."""
-        
-        def objective(trial):
-            params = {
-                'n_estimators': trial.suggest_int('n_estimators', 50, 300),
-                'max_depth': trial.suggest_int('max_depth', 2, 20),
-                'learning_rate': trial.suggest_float('learning_rate', 0.05, 0.5, log=True),
-                'subsample': trial.suggest_float('subsample', 0.7, 1.0),
-                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.7, 1.0),
-                'reg_alpha': trial.suggest_float('reg_alpha', 0.0, 10.0),
-                'reg_lambda': trial.suggest_float('reg_lambda', 1.0, 10.0),
-                'random_state': self.config.random_state
-            }
-            
-            # Override with user-specified params
-            params.update(self.config.model_params)
-            
-            model = xgb.XGBRegressor(**params)
-            model.fit(X_train, y_train)
-            
-            predictions = model.predict(X_val)
-            predictions = np.round(predictions).astype(int)
-            
-            mse = mean_squared_error(y_val, predictions)
-            return mse
-        
-        return objective
-    
-    def _suggest_hyperparameters(self, trial: optuna.Trial, model_type: str) -> Dict[str, Any]:
-        """Suggest hyperparameters for given model type."""
-        if model_type == "xgboost":
-            params = {
-                'n_estimators': trial.suggest_int('n_estimators', 50, 300),
-                'max_depth': trial.suggest_int('max_depth', 2, 20),
-                'learning_rate': trial.suggest_float('learning_rate', 0.05, 0.5, log=True),
-                'subsample': trial.suggest_float('subsample', 0.7, 1.0),
-                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.7, 1.0),
-                'reg_alpha': trial.suggest_float('reg_alpha', 0.0, 10.0),
-                'reg_lambda': trial.suggest_float('reg_lambda', 1.0, 10.0),
-                'random_state': self.config.random_state
-            }
-            params.update(self.config.model_params)
-            return params
-        else:
-            raise ValueError(f"Unknown model type: {model_type}")
-    
-    def _train_final_model(self, X_train: np.ndarray, y_train: np.ndarray,
-                          params: Dict[str, Any], model_type: str) -> Any:
-        """Train final model with given parameters."""
+    def _train_model_with_params(self, X_train: np.ndarray, y_train: np.ndarray,
+                                params: Dict[str, Any], model_type: str) -> Any:
+        """Train model with given parameters."""
         if model_type == "xgboost":
             model = xgb.XGBRegressor(**params)
             model.fit(X_train, y_train)
@@ -285,11 +224,6 @@ class ModelTrainer:
             metrics['mape'] = float('inf')
         
         return metrics
-    
-    def add_model_factory(self, model_type: str, objective_factory: Callable):
-        """Add support for new model types."""
-        self.model_factories[model_type] = objective_factory
-        logger.info(f"Added support for model type: {model_type}")
 
 
 class EnsembleTrainer:

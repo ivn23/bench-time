@@ -34,8 +34,16 @@ def example_single_sku_model():
     
     training_config = TrainingConfig(
         validation_split=0.2,
-        n_trials=20,  # Reduced for demo
-        model_type="xgboost"
+        model_type="xgboost",
+        hyperparameters={
+            'n_estimators': 150,
+            'max_depth': 8,
+            'learning_rate': 0.1,
+            'subsample': 0.8,
+            'colsample_bytree': 0.8,
+            'reg_alpha': 0.1,
+            'reg_lambda': 1.0
+        }
     )
     
     # Initialize pipeline
@@ -77,8 +85,16 @@ def example_multi_granularity_comparison():
     
     training_config = TrainingConfig(
         validation_split=0.2,
-        n_trials=10,  # Fast optimization
-        model_type="xgboost"
+        model_type="xgboost",
+        hyperparameters={
+            'n_estimators': 100,
+            'max_depth': 6,
+            'learning_rate': 0.2,
+            'subsample': 0.9,
+            'colsample_bytree': 0.9,
+            'reg_alpha': 0.0,
+            'reg_lambda': 1.0
+        }
     )
     
     # Initialize pipeline
@@ -189,8 +205,16 @@ def example_model_storage_and_retrieval():
     
     training_config = TrainingConfig(
         validation_split=0.2,
-        n_trials=5,  # Very fast training
-        model_type="xgboost"
+        model_type="xgboost",
+        hyperparameters={
+            'n_estimators': 80,
+            'max_depth': 4,
+            'learning_rate': 0.3,
+            'subsample': 1.0,
+            'colsample_bytree': 1.0,
+            'reg_alpha': 0.0,
+            'reg_lambda': 1.0
+        }
     )
     
     # Initialize components

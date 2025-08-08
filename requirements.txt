@@ -3,7 +3,6 @@ pandas
 polars
 scikit-learn
 xgboost
-optuna
 joblib
 mlflow
 sqlalchemy

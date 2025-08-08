@@ -207,9 +207,20 @@ class TrainingConfig:
     """Configuration for model training."""
     validation_split: float = 0.2
     random_state: int = 42
-    n_trials: int = 50  # For Optuna optimization
     cv_folds: int = 5   # For TimeSeriesSplit
     
     # Model-specific configurations
     model_type: str = "xgboost"
     model_params: Dict[str, Any] = field(default_factory=dict)
+    
+    # Hyperparameters - provided directly instead of tuning
+    hyperparameters: Dict[str, Any] = field(default_factory=lambda: {
+        # Default XGBoost hyperparameters
+        'n_estimators': 100,
+        'max_depth': 6,
+        'learning_rate': 0.3,
+        'subsample': 1.0,
+        'colsample_bytree': 1.0,
+        'reg_alpha': 0.0,
+        'reg_lambda': 1.0,
+    })

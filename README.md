@@ -1,6 +1,6 @@
 # M5 Benchmarking Framework
 
-A production-ready framework for multi-granularity time series forecasting benchmarking using the M5 competition dataset. Provides memory-efficient data processing, XGBoost training with Optuna optimization, and comprehensive evaluation across SKU, Product, and Store levels.
+A production-ready framework for multi-granularity time series forecasting benchmarking using the M5 competition dataset. Provides memory-efficient data processing, XGBoost training with configurable hyperparameters, and comprehensive evaluation across SKU, Product, and Store levels.
 
 ## What This Framework Does
 
@@ -21,7 +21,7 @@ src/
 ├── data_structures.py      # Core data structures and configuration
 ├── data_loading.py         # Polars-based data loading with lazy evaluation
 ├── feature_engineering.py  # Multi-granularity feature engineering  
-├── model_training.py       # XGBoost training with Optuna optimization
+├── model_training.py       # XGBoost training with configurable hyperparameters
 ├── evaluation.py           # Comprehensive evaluation and visualization
 ├── benchmark_pipeline.py   # Main orchestration pipeline
 └── __init__.py            # Package initialization
@@ -33,7 +33,7 @@ src/
 
 **Feature Engineering**: Creates lag features (1-28 days), calendric features (month, weekday, etc.), and trend features. Automatically handles granularity-specific grouping and removes target-related columns to prevent data leakage.
 
-**Model Training**: XGBoost models with Optuna Bayesian hyperparameter optimization. Supports proper time series cross-validation and is extensible to other algorithms.
+**Model Training**: XGBoost models with configurable hyperparameters. Supports proper time series cross-validation and is extensible to other algorithms.
 
 **Evaluation**: Multiple metrics (RMSE, MAE, R², MAPE), model comparison, visualization generation, and automated report creation.
 

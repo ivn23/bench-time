@@ -330,7 +330,6 @@ def create_default_configs(data_dir: Path) -> tuple[DataConfig, TrainingConfig]:
     training_config = TrainingConfig(
         validation_split=0.2,
         random_state=42,
-        n_trials=50,
         cv_folds=5,
         model_type="xgboost"
     )
