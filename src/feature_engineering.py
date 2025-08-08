@@ -18,9 +18,13 @@ class FeatureEngineer:
     """Feature engineering pipeline that works across different granularity levels."""
     
     def __init__(self, 
+                 feature_engineering: bool = False,
+                 feature_engineering_methods: List[str] = None,
                  lag_features: List[int] = [1, 2, 3, 4, 5, 6, 7],
                  calendric_features: bool = True,
                  trend_features: bool = True):
+        self.feature_engineering = feature_engineering
+        self.feature_engineering_methods = feature_engineering_methods or []
         self.lag_features = lag_features
         self.calendric_features = calendric_features  
         self.trend_features = trend_features
@@ -31,41 +35,71 @@ class FeatureEngineer:
                        granularity: GranularityLevel,
                        entity_ids: Dict[str, any]) -> Tuple[pl.DataFrame, List[str]]:
         """
-        Create full feature set for specified granularity level.
+        Process features for specified granularity level.
+        Uses precomputed features by default, applies dynamic feature engineering only if enabled.
         
         Args:
-            features_df: Base features DataFrame
+            features_df: Base features DataFrame (precomputed)
             target_df: Target DataFrame  
             granularity: Level of aggregation
             entity_ids: Entity identifiers
             
         Returns:
-            Tuple of (engineered_features_df, feature_column_names)
+            Tuple of (processed_features_df, feature_column_names)
         """
-        logger.info(f"Creating features for {granularity.value} level")
+        if self.feature_engineering:
+            logger.info(f"Applying dynamic feature engineering for {granularity.value} level")
+            logger.info(f"Enabled methods: {self.feature_engineering_methods}")
+        else:
+            logger.info(f"Using precomputed features for {granularity.value} level")
         
-        # Join features with target to get target values for lag features
+        # Always join with target for consistency (may be needed for some processing)
         df = features_df.join(target_df.select(["bdID", "target"]), on="bdID", how="left")
         
-        # Create calendric features if enabled
-        if self.calendric_features:
-            df = self._create_calendric_features(df, "date")
-        
-        # Create lag features if enabled
-        if self.lag_features:
-            # Now works for all granularity levels including PRODUCT with SKU dummies
-            df = self._add_lag_features(df, granularity, entity_ids)
-        
-        # Create trend features if enabled
-        if self.trend_features:
-            df = self._create_trend_features(df)
+        # Apply dynamic feature engineering only if enabled
+        if self.feature_engineering:
+            df = self._apply_feature_engineering_methods(df, granularity, entity_ids)
         
         # Get feature column names (exclude metadata columns)
         feature_cols = self._get_feature_columns(df)
         
-        logger.info(f"Created {len(feature_cols)} features")
+        logger.info(f"Final feature set: {len(feature_cols)} features")
         
         return df, feature_cols
+    
+    def _apply_feature_engineering_methods(self, 
+                                         df: pl.DataFrame, 
+                                         granularity: GranularityLevel,
+                                         entity_ids: Dict[str, any]) -> pl.DataFrame:
+        """
+        Apply specified feature engineering methods when feature_engineering=True.
+        """
+        # Apply methods based on configuration
+        available_methods = {
+            'create_calendric_features': lambda df: self._create_calendric_features(df, "date"),
+            'create_lag_features': lambda df: self._add_lag_features(df, granularity, entity_ids),
+            'create_trend_features': lambda df: self._create_trend_features(df),
+        }
+        
+        # If no specific methods are listed, apply all legacy-enabled methods (backward compatibility)
+        if not self.feature_engineering_methods:
+            logger.info("No specific methods specified, using legacy configuration")
+            if self.calendric_features:
+                df = self._create_calendric_features(df, "date")
+            if self.lag_features:
+                df = self._add_lag_features(df, granularity, entity_ids)
+            if self.trend_features:
+                df = self._create_trend_features(df)
+        else:
+            # Apply only specified methods
+            for method_name in self.feature_engineering_methods:
+                if method_name in available_methods:
+                    logger.info(f"Applying method: {method_name}")
+                    df = available_methods[method_name](df)
+                else:
+                    logger.warning(f"Unknown feature engineering method: {method_name}")
+        
+        return df
     
     def _create_calendric_features(self, df: pl.DataFrame, date_column: str) -> pl.DataFrame:
         """Create calendric features from date column."""

@@ -36,6 +36,8 @@ class BenchmarkPipeline:
         # Initialize components
         self.data_loader = DataLoader(data_config)
         self.feature_engineer = FeatureEngineer(
+            feature_engineering=data_config.feature_engineering,
+            feature_engineering_methods=data_config.feature_engineering_methods,
             lag_features=data_config.lag_features,
             calendric_features=data_config.calendric_features,
             trend_features=data_config.trend_features

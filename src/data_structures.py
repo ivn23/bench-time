@@ -196,7 +196,11 @@ class DataConfig:
     min_date: Optional[str] = None
     max_date: Optional[str] = None
     
-    # Feature engineering configurations
+    # Feature engineering control - NEW: defaults to using precomputed features
+    feature_engineering: bool = False  # False = use precomputed features, True = apply dynamic feature engineering
+    feature_engineering_methods: List[str] = field(default_factory=list)  # Methods to apply when feature_engineering=True
+    
+    # Legacy feature engineering configurations (used when feature_engineering=True)
     lag_features: List[int] = field(default_factory=lambda: [1, 2, 3, 4, 5, 6, 7])
     calendric_features: bool = True
     trend_features: bool = True

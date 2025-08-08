@@ -22,12 +22,15 @@ def example_single_sku_model():
     """Example: Train a single model for one SKU."""
     logger.info("=== Example: Single SKU Model ===")
     
-    # Configure data and training
+    # Configure data and training - NEW: uses precomputed features by default
     data_config = DataConfig(
         features_path="data/train_data_features.feather",
         target_path="data/train_data_target.feather", 
         mapping_path="data/feature_mapping_train.pkl",
-        lag_features=[1, 2, 3, 7],  # Reduced for faster training
+        # NEW: feature_engineering=False by default (uses precomputed features)
+        feature_engineering=False,  # Use precomputed features from files
+        # Legacy settings (only used if feature_engineering=True)
+        lag_features=[1, 2, 3, 7],
         calendric_features=True,
         trend_features=True
     )
@@ -66,6 +69,53 @@ def example_single_sku_model():
     pipeline.save_experiment_log()
     
     logger.info("Single SKU model example completed")
+    return model
+
+
+def example_with_dynamic_feature_engineering():
+    """Example: Using dynamic feature engineering on top of precomputed features."""
+    logger.info("=== Example: Dynamic Feature Engineering ===")
+    
+    # Configure data with dynamic feature engineering enabled
+    data_config = DataConfig(
+        features_path="data/train_data_features.feather",
+        target_path="data/train_data_target.feather",
+        mapping_path="data/feature_mapping_train.pkl",
+        # NEW: Enable dynamic feature engineering
+        feature_engineering=True,
+        feature_engineering_methods=[
+            'create_lag_features',      # Add lag features
+            'create_calendric_features' # Add calendric features  
+            # Note: 'create_trend_features' not included
+        ],
+        # Configure the specific methods
+        lag_features=[1, 2, 3, 7, 14],  # 1-14 day lags
+        calendric_features=True,
+        trend_features=False  # Disabled since not in methods list
+    )
+    
+    training_config = TrainingConfig(
+        validation_split=0.2,
+        model_type="xgboost",
+        hyperparameters={
+            'n_estimators': 100,
+            'max_depth': 6,
+            'learning_rate': 0.2
+        }
+    )
+    
+    # Initialize pipeline
+    pipeline = BenchmarkPipeline(data_config, training_config, Path("results_dynamic_features"))
+    pipeline.load_and_prepare_data()
+    
+    # Train model with dynamic feature engineering
+    model = pipeline.run_single_model_experiment(
+        granularity=GranularityLevel.SKU,
+        entity_ids={"skuID": 278993},
+        experiment_name="dynamic_features_278993"
+    )
+    
+    logger.info("Dynamic feature engineering example completed")
     return model
 
 
@@ -337,10 +387,13 @@ if __name__ == "__main__":
     print("=" * 50)
     
     try:
-        # Example 1: Single SKU model
+        # Example 1: Single SKU model with precomputed features (DEFAULT)
         example_single_sku_model()
         
-        # Example 2: Multi-granularity comparison
+        # Example 2: Dynamic feature engineering (OPTIONAL) 
+        # example_with_dynamic_feature_engineering()
+        
+        # Example 3: Multi-granularity comparison
         # all_models, evaluation_results = example_multi_granularity_comparison()
         
         # Example 3: Custom feature engineering
