@@ -65,6 +65,8 @@ implement/
 # test notebooks
 src/load_data.ipynb
 
+examples/
+
 src/test_code.ipynb
 src/test_pipeline.ipynb
 
