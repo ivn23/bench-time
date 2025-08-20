@@ -1,6 +1,6 @@
 """
 Model evaluation and benchmarking module.
-Provides comprehensive evaluation capabilities across different granularity levels.
+Provides comprehensive evaluation capabilities across different modeling strategies.
 """
 
 import polars as pl
@@ -11,7 +11,7 @@ from typing import Dict, List, Any, Tuple, Optional
 import logging
 from pathlib import Path
 
-from .data_structures import BenchmarkModel, GranularityLevel, ModelRegistry
+from .data_structures import BenchmarkModel, ModelingStrategy, ModelRegistry
 from .data_loading import DataLoader
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ class ModelEvaluator:
         """
         logger.info(f"Evaluating model: {model.get_identifier()}")
         
-        # Reconstruct test data based on stored split information
+        # Determine which bdIDs to use
         if test_bdIDs is None:
             bdids_to_use = model.data_split.validation_bdIDs
             data_split_name = "validation"
@@ -47,9 +47,52 @@ class ModelEvaluator:
             bdids_to_use = test_bdIDs
             data_split_name = "test"
         
-        # For now, return a message indicating this needs the engineered data
-        logger.warning("Use evaluate_model_with_data() method instead for notebook usage")
-        return {"error": "Use evaluate_model_with_data() method with pre-engineered features"}
+        # Ensure data is loaded in DataLoader
+        if not self.data_loader._is_loaded:
+            self.data_loader.load_data(lazy=False)
+        
+        # Get features and target DataFrames from DataLoader
+        features_df = self.data_loader._features_df
+        target_df = self.data_loader._target_df
+        
+        # Prepare features for modeling
+        X, y, feature_cols = self.data_loader.prepare_features_for_modeling(
+            features_df, target_df, model.metadata.target_column
+        )
+        
+        # Filter to test/validation set
+        test_features = X.filter(pl.col("bdID").is_in(bdids_to_use))
+        test_target = y.filter(pl.col("bdID").is_in(bdids_to_use))
+        
+        if len(test_features) == 0:
+            logger.warning("No test data found for evaluation")
+            return {"error": "No test data available"}
+        
+        # Prepare features for prediction using model's original feature columns
+        X_test = test_features.select(model.metadata.feature_columns).to_numpy()
+        y_test = test_target.select(model.metadata.target_column).to_numpy().flatten()
+        
+        # Make predictions
+        y_pred = model.model.predict(X_test)
+        y_pred = np.clip(np.round(y_pred).astype(int), 0, None)
+        
+        # Calculate comprehensive metrics
+        metrics = self._calculate_comprehensive_metrics(y_test, y_pred)
+        
+        # Create evaluation result
+        evaluation_result = {
+            "model_id": model.get_identifier(),
+            "modeling_strategy": model.metadata.modeling_strategy.value,
+            "sku_tuples": model.metadata.sku_tuples,
+            "n_samples": len(y_test),
+            "predictions": y_pred.tolist(),
+            "actuals": y_test.tolist(),
+            "prediction_errors": (y_test - y_pred).tolist(),
+            "metrics": metrics,
+            "data_split_name": data_split_name
+        }
+        
+        return evaluation_result
     
     def evaluate_model_with_data(self, model: BenchmarkModel, X_data: pl.DataFrame, y_data: pl.DataFrame) -> Dict[str, Any]:
         """
@@ -83,7 +126,7 @@ class ModelEvaluator:
         
         # Make predictions
         y_pred = model.model.predict(X_test)
-        y_pred = np.round(y_pred).astype(int)
+        y_pred = np.clip(np.round(y_pred).astype(int), 0, None)
         
         # Calculate comprehensive metrics
         metrics = self._calculate_comprehensive_metrics(y_test, y_pred)
@@ -91,8 +134,8 @@ class ModelEvaluator:
         # Create evaluation result
         evaluation_result = {
             "model_id": model.get_identifier(),
-            "granularity": model.metadata.granularity.value,
-            "entity_ids": model.metadata.entity_ids,
+            "modeling_strategy": model.metadata.modeling_strategy.value,
+            "sku_tuples": model.metadata.sku_tuples,
             "n_samples": len(y_test),
             "predictions": y_pred.tolist(),
             "actuals": y_test.tolist(),
@@ -145,29 +188,29 @@ class ModelEvaluator:
         
         return comparison_results
     
-    def evaluate_by_granularity(self, 
-                               granularity: GranularityLevel,
-                               test_bdIDs: Optional[np.ndarray] = None) -> Dict[str, Any]:
+    def evaluate_by_modeling_strategy(self, 
+                                     modeling_strategy: ModelingStrategy,
+                                     test_bdIDs: Optional[np.ndarray] = None) -> Dict[str, Any]:
         """
-        Evaluate all models of a specific granularity level.
+        Evaluate all models of a specific modeling strategy.
         
         Args:
-            granularity: Granularity level to evaluate
+            modeling_strategy: Modeling strategy to evaluate (COMBINED or INDIVIDUAL)
             test_bdIDs: Optional test set bdIDs
             
         Returns:
-            Granularity-level evaluation results
+            Strategy-level evaluation results
         """
-        logger.info(f"Evaluating all models at {granularity.value} level")
+        logger.info(f"Evaluating all models with {modeling_strategy.value} strategy")
         
-        # Get all models for this granularity
-        model_ids = self.model_registry.list_models(granularity)
+        # Get all models for this strategy
+        model_ids = self.model_registry.list_models(modeling_strategy)
         
         if not model_ids:
-            logger.warning(f"No models found for granularity {granularity.value}")
-            return {"error": f"No models found for granularity {granularity.value}"}
+            logger.warning(f"No models found for strategy {modeling_strategy.value}")
+            return {"error": f"No models found for strategy {modeling_strategy.value}"}
         
-        # Compare all models at this granularity
+        # Compare all models with this strategy
         return self.compare_models(model_ids, test_bdIDs)
     
     def generate_evaluation_report(self, 
@@ -212,8 +255,8 @@ class ModelEvaluator:
             report_lines.append(f"## Model: {model_id}\n")
             
             # Basic info
-            report_lines.append(f"**Granularity:** {evaluation_results.get('granularity', 'Unknown')}\n")
-            report_lines.append(f"**Entity IDs:** {evaluation_results.get('entity_ids', {})}\n")
+            report_lines.append(f"**Modeling Strategy:** {evaluation_results.get('modeling_strategy', 'Unknown')}\n")
+            report_lines.append(f"**SKU Tuples:** {evaluation_results.get('sku_tuples', [])}\n")
             report_lines.append(f"**Test Samples:** {evaluation_results.get('n_samples', 0)}\n\n")
             
             # Metrics

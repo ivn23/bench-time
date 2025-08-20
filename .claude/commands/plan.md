@@ -23,14 +23,14 @@ prompt: $ARGUMENTS (IMPORTANT: second argument)
 
 ## Workflow
 
-1. **Research the Codebase**: Start with `README.md` to understand the project structure, existing patterns, and conventions
+1. **Research the Codebase**: Start with `README.md` to understand the project structure, existing patterns, and conventions. You shpould also use the serena mcp for understanding the codebase. 
 2. **Write Plan**: Create the plan document in `specs/*.md` following the Plan Format template
 3. IMPORTANT: Think and make sure when you finish your work you return ONLY the path to the plan you've created and nothing else.
 
 ## Codebase Structure
 
 - `README.md` - Project overview and instructions (start here)
-- `apps/` - Application layer you'll be working in
+- `src/` - Code directory you'll be working in
 - `.claude/commands/` - Claude command templates
 - `specs/` - Specification and plan documents
 

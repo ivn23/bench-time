@@ -12,20 +12,23 @@ import pickle
 import json
 
 
-class GranularityLevel(Enum):
-    """Enumeration for different granularity levels."""
-    SKU = "sku"          # Individual product at specific store
-    PRODUCT = "product"   # Same product across multiple stores
-    STORE = "store"      # All products within specific store
-    GLOBAL = "global"      # All products across all stores
+class ModelingStrategy(Enum):
+    """Enumeration for different modeling strategies."""
+    COMBINED = "combined"    # One model for all specified SKUs
+    INDIVIDUAL = "individual"  # Separate model for each SKU
+
+
+# Helper types for better code clarity
+SkuTuple = Tuple[int, int]  # (product_id, store_id)
+SkuList = List[SkuTuple]
 
 
 @dataclass
 class ModelMetadata:
     """Metadata for a trained model."""
     model_id: str
-    granularity: GranularityLevel
-    entity_ids: Dict[str, Union[int, List[int]]]  # SKU/Product/Store IDs
+    modeling_strategy: ModelingStrategy
+    sku_tuples: SkuList  # List of (product_id, store_id) tuples
     model_type: str  # "xgboost", "linear", etc.
     hyperparameters: Dict[str, Any]
     training_config: Dict[str, Any]
@@ -54,9 +57,16 @@ class BenchmarkModel:
     
     def get_identifier(self) -> str:
         """Generate unique identifier for this model."""
-        granularity = self.metadata.granularity.value
-        entity_str = "_".join(str(v) for v in self.metadata.entity_ids.values())
-        return f"{granularity}_{entity_str}_{self.metadata.model_type}"
+        strategy = self.metadata.modeling_strategy.value
+        # Create a hash-based identifier for large tuple lists
+        if len(self.metadata.sku_tuples) > 5:
+            # Use hash for many tuples to keep identifier reasonable length
+            tuple_hash = hash(tuple(sorted(self.metadata.sku_tuples)))
+            return f"{strategy}_{len(self.metadata.sku_tuples)}tuples_{abs(tuple_hash)}_{self.metadata.model_type}"
+        else:
+            # Use explicit tuple representation for small lists
+            tuple_str = "_".join(f"{p}x{s}" for p, s in sorted(self.metadata.sku_tuples))
+            return f"{strategy}_{tuple_str}_{self.metadata.model_type}"
 
 
 class ModelRegistry:
@@ -77,13 +87,13 @@ class ModelRegistry:
         """Retrieve a model by ID."""
         return self.models.get(model_id)
     
-    def list_models(self, granularity: Optional[GranularityLevel] = None) -> List[str]:
-        """List all model IDs, optionally filtered by granularity."""
-        if granularity is None:
+    def list_models(self, modeling_strategy: Optional[ModelingStrategy] = None) -> List[str]:
+        """List all model IDs, optionally filtered by modeling strategy."""
+        if modeling_strategy is None:
             return list(self.models.keys())
         return [
             mid for mid, model in self.models.items() 
-            if model.metadata.granularity == granularity
+            if model.metadata.modeling_strategy == modeling_strategy
         ]
     
     def save_model(self, model_id: str, save_data_splits: bool = True):
@@ -102,8 +112,8 @@ class ModelRegistry:
         # Save metadata as JSON
         metadata_dict = {
             "model_id": model.metadata.model_id,
-            "granularity": model.metadata.granularity.value,
-            "entity_ids": model.metadata.entity_ids,
+            "modeling_strategy": model.metadata.modeling_strategy.value,
+            "sku_tuples": model.metadata.sku_tuples,
             "model_type": model.metadata.model_type,
             "hyperparameters": model.metadata.hyperparameters,
             "training_config": model.metadata.training_config,
@@ -146,8 +156,8 @@ class ModelRegistry:
         
         metadata = ModelMetadata(
             model_id=metadata_dict["model_id"],
-            granularity=GranularityLevel(metadata_dict["granularity"]),
-            entity_ids=metadata_dict["entity_ids"],
+            modeling_strategy=ModelingStrategy(metadata_dict["modeling_strategy"]),
+            sku_tuples=[(tuple(t) if isinstance(t, list) else t) for t in metadata_dict["sku_tuples"]],
             model_type=metadata_dict["model_type"],
             hyperparameters=metadata_dict["hyperparameters"],
             training_config=metadata_dict["training_config"],
@@ -196,14 +206,8 @@ class DataConfig:
     min_date: Optional[str] = None
     max_date: Optional[str] = None
     
-    # Feature engineering control - NEW: defaults to using precomputed features
-    feature_engineering: bool = False  # False = use precomputed features, True = apply dynamic feature engineering
-    feature_engineering_methods: List[str] = field(default_factory=list)  # Methods to apply when feature_engineering=True
-    
-    # Legacy feature engineering configurations (used when feature_engineering=True)
-    lag_features: List[int] = field(default_factory=lambda: [1, 2, 3, 4, 5, 6, 7])
-    calendric_features: bool = True
-    trend_features: bool = True
+    # Temporal split configuration
+    split_date: Optional[str] = None  # If provided, use this date for train/validation split
 
 
 @dataclass

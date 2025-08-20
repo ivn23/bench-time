@@ -12,3 +12,8 @@ README.md
 context/comprehensive_code_analysis.md
 context/data_structures_uml.md
 context/general_sequence.md
+Read the claude.md root file before you do anything.
+
+Always use:
+- context7 for up to date documentation on third party code
+- sequential thinking for any decision making

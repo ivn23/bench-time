@@ -1,18 +1,17 @@
 """
 M5 Benchmarking Framework
 
-A comprehensive framework for multi-granularity time series forecasting benchmarking
+A comprehensive framework for multi-SKU time series forecasting benchmarking
 using the M5 competition dataset.
 """
 
 from .data_structures import (
-    GranularityLevel, ModelMetadata, DataSplit, BenchmarkModel, 
+    ModelingStrategy, SkuTuple, SkuList, ModelMetadata, DataSplit, BenchmarkModel, 
     ModelRegistry, DataConfig, TrainingConfig
 )
 
 from .data_loading import DataLoader
-from .feature_engineering import FeatureEngineer
-from .model_training import ModelTrainer, EnsembleTrainer
+from .model_training import ModelTrainer
 from .evaluation import ModelEvaluator, VisualizationGenerator
 from .benchmark_pipeline import BenchmarkPipeline
 
@@ -20,7 +19,9 @@ __version__ = "1.0.0"
 __author__ = "M5 Benchmarking Team"
 
 __all__ = [
-    "GranularityLevel",
+    "ModelingStrategy",
+    "SkuTuple",
+    "SkuList",
     "ModelMetadata", 
     "DataSplit",
     "BenchmarkModel",
@@ -28,9 +29,7 @@ __all__ = [
     "DataConfig",
     "TrainingConfig", 
     "DataLoader",
-    "FeatureEngineer",
     "ModelTrainer",
-    "EnsembleTrainer",
     "ModelEvaluator",
     "VisualizationGenerator",
     "BenchmarkPipeline"
