@@ -17,3 +17,4 @@ Read the claude.md root file before you do anything.
 Always use:
 - context7 for up to date documentation on third party code
 - sequential thinking for any decision making
+- use the serena mcp server to get the information on the project 
