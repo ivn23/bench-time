@@ -7,7 +7,7 @@ import pytest
 import polars as pl
 from pathlib import Path
 
-from src import BenchmarkPipeline, ModelingStrategy
+from src import BenchmarkPipeline, ModelingStrategy, TrainingConfig
 
 
 class TestPipelineIntegration:
@@ -331,3 +331,174 @@ class TestPipelineIntegration:
             loaded_log = json.load(f)
         assert isinstance(loaded_log, list)
         assert len(loaded_log) > 0
+
+    @pytest.mark.integration
+    def test_quantile_model_workflow(
+        self,
+        sample_data_config,
+        single_sku_tuple,
+        temp_output_dir
+    ):
+        """Test complete workflow with quantile XGBoost model."""
+        # Configure quantile model training
+        quantile_training_config = TrainingConfig(
+            validation_split=0.2,
+            model_type="xgboost_quantile",
+            quantile_alpha=0.75,
+            hyperparameters={
+                "max_depth": 4,
+                "learning_rate": 0.3,
+                "n_estimators": 10  # Keep low for fast testing
+            }
+        )
+        
+        # Initialize pipeline
+        pipeline = BenchmarkPipeline(
+            data_config=sample_data_config,
+            training_config=quantile_training_config,
+            output_dir=temp_output_dir
+        )
+        
+        # Load data and run experiment
+        pipeline.load_and_prepare_data()
+        models = pipeline.run_experiment(
+            sku_tuples=single_sku_tuple,
+            modeling_strategy=ModelingStrategy.COMBINED,
+            experiment_name="test_quantile"
+        )
+        
+        # Validate quantile model was created
+        assert len(models) == 1
+        model = models[0]
+        
+        # Check model metadata
+        assert model.metadata.model_type == "xgboost_quantile"
+        assert "q0.75" in model.get_identifier()
+        
+        # Check quantile-specific metrics are present
+        metrics = model.metadata.performance_metrics
+        assert "quantile_score" in metrics
+        assert "coverage_probability" in metrics
+        assert "coverage_error" in metrics
+        assert "quantile_alpha" in metrics
+        assert metrics["quantile_alpha"] == 0.75
+        
+        # Ensure standard metrics are also present
+        assert "mse" in metrics
+        assert "rmse" in metrics
+        assert "mae" in metrics
+        assert "r2" in metrics
+        
+        # Test model persistence with quantile model
+        model_id = model.get_identifier()
+        model_dir = temp_output_dir / "models" / model_id
+        assert model_dir.exists()
+        
+        # Test loading quantile model
+        loaded_model = pipeline.model_registry.load_model(model_id)
+        assert loaded_model is not None
+        assert loaded_model.metadata.model_type == "xgboost_quantile"
+
+    @pytest.mark.integration
+    def test_mixed_model_types_workflow(
+        self,
+        sample_data_config,
+        single_sku_tuple,
+        temp_output_dir
+    ):
+        """Test workflow with both standard and quantile models."""
+        # Create separate directories for each pipeline to avoid conflicts
+        from tempfile import mkdtemp
+        from pathlib import Path
+        
+        standard_dir = Path(mkdtemp())
+        quantile_dir = Path(mkdtemp())
+        
+        try:
+            # Train standard XGBoost model
+            standard_config = TrainingConfig(
+                model_type="xgboost",
+                hyperparameters={"n_estimators": 10, "max_depth": 4}
+            )
+            
+            pipeline_standard = BenchmarkPipeline(
+                data_config=sample_data_config,
+                training_config=standard_config,
+                output_dir=standard_dir
+            )
+            
+            pipeline_standard.load_and_prepare_data()
+            standard_models = pipeline_standard.run_experiment(
+                sku_tuples=single_sku_tuple,
+                modeling_strategy=ModelingStrategy.COMBINED,
+                experiment_name="test_mixed_standard"
+            )
+            
+            # Train quantile XGBoost model
+            quantile_config = TrainingConfig(
+                model_type="xgboost_quantile",
+                quantile_alpha=0.7,
+                hyperparameters={"max_depth": 4, "learning_rate": 0.3}
+            )
+            
+            pipeline_quantile = BenchmarkPipeline(
+                data_config=sample_data_config,
+                training_config=quantile_config,
+                output_dir=quantile_dir
+            )
+            
+            pipeline_quantile.load_and_prepare_data()
+            quantile_models = pipeline_quantile.run_experiment(
+                sku_tuples=single_sku_tuple,
+                modeling_strategy=ModelingStrategy.COMBINED,
+                experiment_name="test_mixed_quantile"
+            )
+        
+            # Validate both model types were created
+            assert len(standard_models) == 1
+            assert len(quantile_models) == 1
+            
+            standard_model = standard_models[0]
+            quantile_model = quantile_models[0]
+            
+            assert standard_model.metadata.model_type == "xgboost"
+            assert quantile_model.metadata.model_type == "xgboost_quantile"
+            
+            # Check different metrics are present
+            standard_metrics = standard_model.metadata.performance_metrics
+            quantile_metrics = quantile_model.metadata.performance_metrics
+            
+            # Standard model should NOT have quantile metrics
+            assert "quantile_score" not in standard_metrics
+            assert "coverage_probability" not in standard_metrics
+            
+            # Quantile model SHOULD have quantile metrics
+            assert "quantile_score" in quantile_metrics
+            assert "coverage_probability" in quantile_metrics
+            
+            # Both should have standard metrics
+            for metrics in [standard_metrics, quantile_metrics]:
+                assert "mse" in metrics
+                assert "rmse" in metrics
+                assert "mae" in metrics
+                assert "r2" in metrics
+            
+            # Check that models exist in their respective registries
+            standard_models_list = pipeline_standard.model_registry.list_models()
+            quantile_models_list = pipeline_quantile.model_registry.list_models()
+            
+            assert len(standard_models_list) == 1
+            assert len(quantile_models_list) == 1
+            
+            # Verify model types are different
+            standard_loaded = pipeline_standard.model_registry.get_model(standard_models_list[0])
+            quantile_loaded = pipeline_quantile.model_registry.get_model(quantile_models_list[0])
+            
+            assert standard_loaded.metadata.model_type == "xgboost"
+            assert quantile_loaded.metadata.model_type == "xgboost_quantile"
+            
+        finally:
+            # Cleanup temporary directories
+            import shutil
+            shutil.rmtree(standard_dir, ignore_errors=True)
+            shutil.rmtree(quantile_dir, ignore_errors=True)

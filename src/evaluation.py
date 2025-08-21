@@ -124,12 +124,25 @@ class ModelEvaluator:
         X_test = test_features.select(model.metadata.feature_columns).to_numpy()
         y_test = test_target.select(model.metadata.target_column).to_numpy().flatten()
         
-        # Make predictions
-        y_pred = model.model.predict(X_test)
-        y_pred = np.clip(np.round(y_pred).astype(int), 0, None)
+        # Make predictions using the underlying model object
+        underlying_model = model.model
         
-        # Calculate comprehensive metrics
-        metrics = self._calculate_comprehensive_metrics(y_test, y_pred)
+        # Check if this is a new extensible model or legacy model
+        if hasattr(underlying_model, 'predict') and hasattr(underlying_model, 'get_evaluation_metrics'):
+            # New extensible model interface
+            y_pred = underlying_model.predict(X_test)
+            
+            # Use model-specific metrics
+            try:
+                model_metrics = underlying_model.get_evaluation_metrics(y_test, y_pred)
+            except Exception as e:
+                logger.warning(f"Failed to get model-specific metrics: {e}. Using standard metrics.")
+                model_metrics = self._calculate_comprehensive_metrics(y_test, y_pred)
+        else:
+            # Legacy model (sklearn interface)
+            y_pred = underlying_model.predict(X_test)
+            y_pred = np.clip(np.round(y_pred).astype(int), 0, None)
+            model_metrics = self._calculate_comprehensive_metrics(y_test, y_pred)
         
         # Create evaluation result
         evaluation_result = {
@@ -140,7 +153,7 @@ class ModelEvaluator:
             "predictions": y_pred.tolist(),
             "actuals": y_test.tolist(),
             "prediction_errors": (y_test - y_pred).tolist(),
-            "metrics": metrics,
+            "metrics": model_metrics,
             "data_split_name": "validation"
         }
         

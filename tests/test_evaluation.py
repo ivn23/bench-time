@@ -32,9 +32,19 @@ class TestModelEvaluator:
     @pytest.fixture
     def sample_trained_model(self, sample_training_config, single_sku_tuple):
         """Create a sample trained model for testing."""
-        # Create a simple mock XGBoost model
+        # Create a simple mock XGBoost model that supports both old and new interfaces
         mock_xgb_model = Mock()
         mock_xgb_model.predict.return_value = np.array([1.1, 2.2, 3.3, 4.4, 5.5])
+        
+        # Mock the new extensible interface methods
+        def mock_get_evaluation_metrics(y_true, y_pred):
+            return {
+                "mse": 0.5, "rmse": 0.707, "mae": 0.4, "r2": 0.8, "mape": 10.0,
+                "max_error": 1.0, "mean_error": 0.1, "std_error": 0.3,
+                "within_1_unit": 0.8, "within_2_units": 0.9, "within_5_units": 1.0
+            }
+        
+        mock_xgb_model.get_evaluation_metrics = mock_get_evaluation_metrics
         
         # Create metadata
         metadata = ModelMetadata(

@@ -57,6 +57,11 @@ class BenchmarkModel:
     
     def get_identifier(self) -> str:
         """Generate unique identifier for this model."""
+        # Use the model_id from metadata if it exists and is not empty
+        if self.metadata.model_id and self.metadata.model_id.strip():
+            return self.metadata.model_id
+        
+        # Fallback to legacy identifier generation
         strategy = self.metadata.modeling_strategy.value
         # Create a hash-based identifier for large tuple lists
         if len(self.metadata.sku_tuples) > 5:
@@ -220,6 +225,12 @@ class TrainingConfig:
     # Model-specific configurations
     model_type: str = "xgboost"
     model_params: Dict[str, Any] = field(default_factory=dict)
+    
+    # Quantile-specific parameters
+    quantile_alpha: Optional[float] = None  # For quantile models (e.g., 0.7 for 70% quantile)
+    
+    # Model-specific parameters dictionary for extensibility
+    model_specific_params: Dict[str, Any] = field(default_factory=dict)
     
     # Hyperparameters - provided directly instead of tuning
     hyperparameters: Dict[str, Any] = field(default_factory=lambda: {

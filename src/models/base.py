@@ -1,0 +1,112 @@
+"""
+Abstract base classes for model implementations in the M5 benchmarking framework.
+
+This module defines the standard interface that all models must implement
+to work with the framework's training, evaluation, and persistence systems.
+"""
+
+from abc import ABC, abstractmethod
+from typing import Any, Dict, List, Optional, Tuple
+import numpy as np
+
+
+class BaseModel(ABC):
+    """
+    Abstract base class for all model implementations.
+    
+    This class defines the standard interface that all models must implement
+    to be compatible with the M5 benchmarking framework.
+    """
+    
+    def __init__(self, **model_params):
+        """
+        Initialize the model with parameters.
+        
+        Args:
+            **model_params: Model-specific parameters
+        """
+        self.model_params = model_params
+        self.model = None
+        self.is_trained = False
+        
+    @abstractmethod
+    def train(self, X_train: np.ndarray, y_train: np.ndarray, 
+              X_val: Optional[np.ndarray] = None, y_val: Optional[np.ndarray] = None,
+              **training_kwargs) -> None:
+        """
+        Train the model on provided data.
+        
+        Args:
+            X_train: Training features
+            y_train: Training targets  
+            X_val: Validation features (optional)
+            y_val: Validation targets (optional)
+            **training_kwargs: Additional training parameters
+        """
+        pass
+        
+    @abstractmethod
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """
+        Make predictions on new data.
+        
+        Args:
+            X: Features for prediction
+            
+        Returns:
+            Array of predictions
+            
+        Raises:
+            ValueError: If model is not trained
+        """
+        pass
+        
+    @abstractmethod
+    def get_model_info(self) -> Dict[str, Any]:
+        """
+        Get model information and metadata.
+        
+        Returns:
+            Dictionary containing model type, parameters, and other metadata
+        """
+        pass
+        
+    @abstractmethod
+    def get_evaluation_metrics(self, y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
+        """
+        Calculate model-specific evaluation metrics.
+        
+        Args:
+            y_true: True target values
+            y_pred: Predicted values
+            
+        Returns:
+            Dictionary of metric names and values
+        """
+        pass
+        
+    def is_model_trained(self) -> bool:
+        """Check if model has been trained."""
+        return self.is_trained
+        
+    def get_model_params(self) -> Dict[str, Any]:
+        """Get model parameters."""
+        return self.model_params.copy()
+        
+    def set_model_params(self, **params) -> None:
+        """Update model parameters."""
+        self.model_params.update(params)
+        
+    def get_underlying_model(self) -> Any:
+        """Get the underlying model object (for serialization)."""
+        return self.model
+
+
+class ModelTrainingError(Exception):
+    """Exception raised when model training fails."""
+    pass
+
+
+class ModelPredictionError(Exception):
+    """Exception raised when model prediction fails.""" 
+    pass

@@ -62,9 +62,10 @@ class TestModelTrainer:
         assert model.metadata.feature_columns == feature_cols
         assert model.metadata.target_column == "target"
         
-        # Check model object
+        # Check model object - now wrapped in our extensible architecture
         assert model.model is not None
-        assert isinstance(model.model, xgb.XGBRegressor)
+        from src.models import XGBoostStandardModel
+        assert isinstance(model.model, XGBoostStandardModel)
         assert hasattr(model.model, 'predict')
         
         # Check data split information
@@ -207,7 +208,7 @@ class TestModelTrainer:
         
         trainer = ModelTrainer(sample_training_config)
         
-        with pytest.raises(ValueError, match="Unsupported model type"):
+        with pytest.raises(ValueError, match="Unknown model type"):
             trainer.train_model(
                 X_train, y_train, X_test, y_test,
                 feature_cols, "target", ModelingStrategy.COMBINED, single_sku_tuple
@@ -294,7 +295,8 @@ class TestModelTrainer:
             X_train, y_train, hyperparameters, "xgboost"
         )
         
-        assert isinstance(model, xgb.XGBRegressor)
+        from src.models import XGBoostStandardModel
+        assert isinstance(model, XGBoostStandardModel)
         assert hasattr(model, 'predict')
         
         # Test unsupported model type

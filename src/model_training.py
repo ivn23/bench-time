@@ -34,7 +34,7 @@ class ModelTrainer:
                    modeling_strategy: ModelingStrategy,
                    sku_tuples: SkuList) -> BenchmarkModel:
         """
-        Train a model with fixed hyperparameters.
+        Train a model with fixed hyperparameters using model factory pattern.
         
         Args:
             X_train, y_train: Training data
@@ -64,20 +64,35 @@ class ModelTrainer:
         
         logger.info(f"Using hyperparameters: {hyperparameters}")
         
-        # Train model with fixed hyperparameters
+        # Log model-specific parameters
+        if self.config.quantile_alpha is not None:
+            logger.info(f"Quantile alpha: {self.config.quantile_alpha}")
+        
+        # Train model with fixed hyperparameters using model factory
         final_model = self._train_model_with_params(
-            X_train_np, y_train_np, hyperparameters, self.config.model_type
+            X_train_np, y_train_np, hyperparameters, self.config.model_type,
+            X_val=X_test_np, y_val=y_test_np, quantile_alpha=self.config.quantile_alpha
         )
         
-        # Evaluate on test set
+        # Evaluate on test set using model-specific evaluation
         test_predictions = final_model.predict(X_test_np)
-        test_predictions = np.clip(np.round(test_predictions).astype(int), 0, None)
         
-        metrics = self._calculate_metrics(y_test_np, test_predictions)
+        # Get metrics using model-specific evaluation if available
+        if hasattr(final_model, 'get_evaluation_metrics'):
+            metrics = final_model.get_evaluation_metrics(y_test_np, test_predictions)
+        else:
+            # Fallback to legacy metrics calculation
+            test_predictions = np.clip(np.round(test_predictions).astype(int), 0, None)
+            metrics = self._calculate_metrics(y_test_np, test_predictions)
         
-        # Create model metadata
+        # Create model metadata with enhanced info
+        model_id_parts = [modeling_strategy.value, f"{len(sku_tuples)}skus", self.config.model_type]
+        if self.config.quantile_alpha is not None:
+            model_id_parts.append(f"q{self.config.quantile_alpha}")
+        model_id = "_".join(model_id_parts)
+        
         metadata = ModelMetadata(
-            model_id=f"{modeling_strategy.value}_{len(sku_tuples)}skus_{self.config.model_type}",
+            model_id=model_id,
             modeling_strategy=modeling_strategy,
             sku_tuples=sku_tuples,
             model_type=self.config.model_type,
@@ -104,19 +119,39 @@ class ModelTrainer:
             data_split=data_split
         )
         
-        logger.info(f"Model training completed. Test MSE: {metrics['mse']:.4f}")
+        logger.info(f"Model training completed. Primary metric: {metrics.get('rmse', metrics.get('mse', 'N/A'))}")
         
         return benchmark_model
     
     def _train_model_with_params(self, X_train: np.ndarray, y_train: np.ndarray, 
-                                hyperparameters: Dict[str, Any], model_type: str):
-        """Train model with specified hyperparameters."""
-        if model_type == "xgboost":
-            model = xgb.XGBRegressor(**hyperparameters)
-            model.fit(X_train, y_train)
-            return model
-        else:
-            raise ValueError(f"Unsupported model type: {model_type}")
+                                hyperparameters: Dict[str, Any], model_type: str,
+                                X_val: np.ndarray = None, y_val: np.ndarray = None,
+                                quantile_alpha: float = None) -> Any:
+        """Train model with specified hyperparameters using model factory."""
+        try:
+            # Import the model factory
+            from .models import get_model_class
+            
+            # Get the appropriate model class
+            model_class = get_model_class(model_type)
+            
+            # Prepare model parameters
+            model_params = hyperparameters.copy()
+            
+            # Add quantile parameter for quantile models
+            if model_type == "xgboost_quantile" and quantile_alpha is not None:
+                model_instance = model_class(quantile_alpha=quantile_alpha, **model_params)
+            else:
+                model_instance = model_class(**model_params)
+            
+            # Train the model
+            model_instance.train(X_train, y_train, X_val, y_val)
+            
+            return model_instance
+            
+        except Exception as e:
+            logger.error(f"Failed to train model type '{model_type}': {str(e)}")
+            raise
     
     def _calculate_metrics(self, y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
         """Calculate evaluation metrics."""

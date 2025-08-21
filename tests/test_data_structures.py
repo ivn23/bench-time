@@ -225,6 +225,7 @@ class TestBenchmarkModel:
         """Test BenchmarkModel identifier generation."""
         mock_model = {"type": "mock"}
         
+        # Test with existing model_id - should return the model_id
         benchmark_model = BenchmarkModel(
             metadata=sample_model_metadata,
             model=mock_model,
@@ -234,10 +235,35 @@ class TestBenchmarkModel:
         identifier = benchmark_model.get_identifier()
         assert isinstance(identifier, str)
         assert len(identifier) > 0
+        # Should return the model_id from metadata
+        assert identifier == "test_model_003"
+        
+        # Test with empty model_id - should generate legacy identifier
+        metadata_without_id = ModelMetadata(
+            model_id="",  # Empty model_id
+            modeling_strategy=ModelingStrategy.COMBINED,
+            sku_tuples=[(80558, 2)],
+            model_type="xgboost",
+            hyperparameters={"n_estimators": 100},
+            training_config={"random_state": 42},
+            performance_metrics={"mse": 0.8},
+            feature_columns=["feature1", "feature2"],
+            target_column="target"
+        )
+        
+        benchmark_model_legacy = BenchmarkModel(
+            metadata=metadata_without_id,
+            model=mock_model,
+            data_split=sample_data_split
+        )
+        
+        legacy_identifier = benchmark_model_legacy.get_identifier()
+        assert isinstance(legacy_identifier, str)
+        assert len(legacy_identifier) > 0
         # Should be based on strategy, SKU tuples, and model type
-        assert "combined" in identifier  # modeling strategy
-        assert "80558x2" in identifier   # SKU tuple format
-        assert "xgboost" in identifier   # model type
+        assert "combined" in legacy_identifier  # modeling strategy
+        assert "80558x2" in legacy_identifier   # SKU tuple format
+        assert "xgboost" in legacy_identifier   # model type
 
     def test_benchmark_model_with_different_strategies(self, sample_data_split):
         """Test BenchmarkModel with different modeling strategies."""
