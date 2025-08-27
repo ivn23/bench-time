@@ -72,3 +72,5 @@ src/test_pipeline.ipynb
 .github
 
 notebooks/
+
+.pytest_cache/

@@ -10,8 +10,7 @@ eza . --tree --all
 
 README.md
 context/comprehensive_code_analysis.md
-context/data_structures_uml.md
-context/general_sequence.md
+context/test_overview.md
 Read the claude.md root file before you do anything.
 
 Always use:
