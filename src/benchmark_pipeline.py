@@ -111,22 +111,22 @@ class BenchmarkPipeline:
         return sku_tuples[0]
 
     def _train_combined_models(self, sku_tuples: SkuList, model_type: str, exp_name: str) -> List[BenchmarkModel]:
-        """Train combined models for a specific model type."""
+        """Train combined models for a specific model type (now supports multi-quantile)."""
         primary_sku = self._extract_primary_sku(sku_tuples)
-        model = self._train_combined_model(sku_tuples, model_type, exp_name, primary_sku)
-        return [model]
+        models = self._train_combined_model(sku_tuples, model_type, exp_name, primary_sku)
+        return models  # Now returns list of models for multi-quantile support
     
     def _train_individual_models(self, sku_tuples: SkuList, model_type: str, exp_name: str) -> List[BenchmarkModel]:
-        """Train individual models for each SKU and model type."""
+        """Train individual models for each SKU and model type (now supports multi-quantile)."""
         models = []
         for i, sku_tuple in enumerate(sku_tuples):
             individual_name = f"{exp_name}_{model_type}_sku_{sku_tuple[0]}x{sku_tuple[1]}"
-            model = self._train_individual_model([sku_tuple], model_type, individual_name, i+1, len(sku_tuples))
-            models.append(model)
+            sku_models = self._train_individual_model([sku_tuple], model_type, individual_name, i+1, len(sku_tuples))
+            models.extend(sku_models)  # Now extends list for multi-quantile support
         return models
     
-    def _train_combined_model(self, sku_tuples: SkuList, model_type: str, exp_name: str, primary_sku: SkuTuple) -> BenchmarkModel:
-        """Train a single model on all specified SKUs."""
+    def _train_combined_model(self, sku_tuples: SkuList, model_type: str, exp_name: str, primary_sku: SkuTuple) -> List[BenchmarkModel]:
+        """Train model(s) on all specified SKUs (now supports multi-quantile)."""
         # Get data for all SKUs
         features_df, target_df = self.data_loader.get_data_for_tuples(
             sku_tuples, ModelingStrategy.COMBINED, collect=True
@@ -155,39 +155,46 @@ class BenchmarkPipeline:
         X_test = X.filter(pl.col("bdID").is_in(test_bdids))
         y_test = y.filter(pl.col("bdID").is_in(test_bdids))
         
-        # Train model with specified type
-        model = self.model_trainer.train_model(
+        # Train model(s) with specified type - now returns list of models for multi-quantile
+        models = self.model_trainer.train_model(
             X_train, y_train, X_test, y_test,
             feature_cols, self.data_config.target_column,
             ModelingStrategy.COMBINED, sku_tuples, model_type
         )
         
-        # Update data split info
-        model.data_split.split_date = str(split_date)
+        # Process each trained model
+        trained_models = []
+        for model in models:
+            # Update data split info
+            model.data_split.split_date = str(split_date)
+            
+            # Register and save model
+            model_id = self.model_registry.register_model(model)
+            self.model_registry.save_model(model_id)
+            
+            # Log experiment
+            experiment_record = {
+                "experiment_name": exp_name,
+                "model_id": model_id,
+                "modeling_strategy": ModelingStrategy.COMBINED.value,
+                "sku_tuples": sku_tuples,
+                "model_type": model_type,
+                "quantile_level": model.metadata.quantile_level,
+                "n_samples": len(X),
+                "n_features": len(feature_cols),
+                "split_date": str(split_date),
+                "performance": model.metadata.performance_metrics
+            }
+            self.experiment_log.append(experiment_record)
+            trained_models.append(model)
+            
+            logger.info(f"Combined model trained for {len(sku_tuples)} SKUs. Model ID: {model_id}")
         
-        # Register and save model
-        model_id = self.model_registry.register_model(model)
-        self.model_registry.save_model(model_id)
-        
-        # Log experiment
-        experiment_record = {
-            "experiment_name": exp_name,
-            "model_id": model_id,
-            "modeling_strategy": ModelingStrategy.COMBINED.value,
-            "sku_tuples": sku_tuples,
-            "n_samples": len(X),
-            "n_features": len(feature_cols),
-            "split_date": str(split_date),
-            "performance": model.metadata.performance_metrics
-        }
-        self.experiment_log.append(experiment_record)
-        
-        logger.info(f"Combined model trained for {len(sku_tuples)} SKUs. Model ID: {model_id}")
-        return model
+        return trained_models
 
     def _train_individual_model(self, sku_tuples: SkuList, model_type: str, exp_name: str, 
-                               current: int, total: int) -> BenchmarkModel:
-        """Train an individual model for a single SKU."""
+                               current: int, total: int) -> List[BenchmarkModel]:
+        """Train individual model(s) for a single SKU (now supports multi-quantile)."""
         logger.info(f"Training individual model {current}/{total}: {sku_tuples[0]}")
         
         # Get data for this SKU
@@ -218,35 +225,42 @@ class BenchmarkPipeline:
         X_test = X.filter(pl.col("bdID").is_in(test_bdids))
         y_test = y.filter(pl.col("bdID").is_in(test_bdids))
         
-        # Train model with specified type
-        model = self.model_trainer.train_model(
+        # Train model(s) with specified type - now returns list of models for multi-quantile
+        models = self.model_trainer.train_model(
             X_train, y_train, X_test, y_test,
             feature_cols, self.data_config.target_column,
             ModelingStrategy.INDIVIDUAL, sku_tuples, model_type
         )
         
-        # Update data split info
-        model.data_split.split_date = str(split_date)
+        # Process each trained model
+        trained_models = []
+        for model in models:
+            # Update data split info
+            model.data_split.split_date = str(split_date)
+            
+            # Register and save model
+            model_id = self.model_registry.register_model(model)
+            self.model_registry.save_model(model_id)
+            
+            # Log experiment
+            experiment_record = {
+                "experiment_name": exp_name,
+                "model_id": model_id,
+                "modeling_strategy": ModelingStrategy.INDIVIDUAL.value,
+                "sku_tuples": sku_tuples,
+                "model_type": model_type,
+                "quantile_level": model.metadata.quantile_level,
+                "n_samples": len(X),
+                "n_features": len(feature_cols),
+                "split_date": str(split_date),
+                "performance": model.metadata.performance_metrics
+            }
+            self.experiment_log.append(experiment_record)
+            trained_models.append(model)
+            
+            logger.info(f"Individual model trained for SKU {sku_tuples[0]}. Model ID: {model_id}")
         
-        # Register and save model
-        model_id = self.model_registry.register_model(model)
-        self.model_registry.save_model(model_id)
-        
-        # Log experiment
-        experiment_record = {
-            "experiment_name": exp_name,
-            "model_id": model_id,
-            "modeling_strategy": ModelingStrategy.INDIVIDUAL.value,
-            "sku_tuples": sku_tuples,
-            "n_samples": len(X),
-            "n_features": len(feature_cols),
-            "split_date": str(split_date),
-            "performance": model.metadata.performance_metrics
-        }
-        self.experiment_log.append(experiment_record)
-        
-        logger.info(f"Individual model trained for SKU {sku_tuples[0]}. Model ID: {model_id}")
-        return model
+        return trained_models
 
     def evaluate_all_models(self) -> Dict[str, Any]:
         """Evaluate all models in the registry."""

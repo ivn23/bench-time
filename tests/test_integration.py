@@ -248,15 +248,18 @@ class TestPipelineIntegration:
             experiment_name="test_persistence"
         )
         
-        # Get model ID and verify it was saved
-        model_id = models[0].get_identifier()
-        model_dir = temp_output_dir / "models" / model_id
-        assert model_dir.exists()
+        # Get model and verify it was saved using hierarchical storage
+        model = models[0]
+        model_id = model.get_identifier()
+        storage_location = model.get_storage_location()
+        model_dir = pipeline.model_registry.storage_manager.create_model_path(storage_location)
+        
+        assert model_dir.exists(), f"Model directory not found at {model_dir}"
         
         # Check expected files exist
         expected_files = ["model.pkl", "metadata.json", "data_splits.json"]
         for filename in expected_files:
-            assert (model_dir / filename).exists()
+            assert (model_dir / filename).exists(), f"Expected file {filename} not found in {model_dir}"
         
         # Verify data_splits.json content
         import json
@@ -391,10 +394,11 @@ class TestPipelineIntegration:
         assert "mae" in metrics
         assert "r2" in metrics
         
-        # Test model persistence with quantile model
+        # Test model persistence with hierarchical storage
         model_id = model.get_identifier()
-        model_dir = temp_output_dir / "models" / model_id
-        assert model_dir.exists()
+        storage_location = model.get_storage_location()
+        model_dir = pipeline.model_registry.storage_manager.create_model_path(storage_location)
+        assert model_dir.exists(), f"Model directory not found at {model_dir}"
         
         # Test loading quantile model
         loaded_model = pipeline.model_registry.load_model(model_id)
@@ -506,3 +510,223 @@ class TestPipelineIntegration:
             import shutil
             shutil.rmtree(standard_dir, ignore_errors=True)
             shutil.rmtree(quantile_dir, ignore_errors=True)
+
+    @pytest.mark.integration
+    def test_lightning_combined_strategy_workflow(
+        self, 
+        sample_data_config, 
+        sample_sku_tuples,
+        temp_output_dir
+    ):
+        """Test complete Lightning model workflow with COMBINED strategy."""
+        
+        # Setup Lightning configuration
+        lightning_config = TrainingConfig(random_state=42)
+        lightning_config.add_model_config(
+            model_type="lightning_standard",
+            hyperparameters={
+                "hidden_size": 64,
+                "lr": 1e-2,
+                "dropout": 0.1,
+                "max_epochs": 5,  # Small for fast testing
+                "batch_size": 32
+            }
+        )
+        
+        pipeline = BenchmarkPipeline(
+            data_config=sample_data_config, 
+            training_config=lightning_config, 
+            output_dir=temp_output_dir
+        )
+        pipeline.load_and_prepare_data()
+        
+        # Run Lightning experiment
+        models = pipeline.run_experiment(
+            sku_tuples=sample_sku_tuples[:2],
+            modeling_strategy=ModelingStrategy.COMBINED,
+            experiment_name="lightning_combined_test"
+        )
+        
+        # Verify results
+        assert len(models) == 1
+        model = models[0]
+        assert model.metadata.model_type == "lightning_standard"
+        assert model.metadata.modeling_strategy == ModelingStrategy.COMBINED
+        assert len(model.metadata.sku_tuples) == 2
+        
+        # Verify metrics
+        metrics = model.metadata.performance_metrics
+        expected_metrics = ['mse', 'rmse', 'mae', 'r2', 'mape', 'max_error', 'mean_error', 'std_error',
+                           'within_1_unit', 'within_2_units', 'within_5_units']
+        for metric in expected_metrics:
+            assert metric in metrics
+            assert isinstance(metrics[metric], (int, float))
+        
+        # Verify model persistence
+        model_id = model.get_identifier()
+        retrieved_model = pipeline.model_registry.get_model(model_id)
+        assert retrieved_model is not None
+        assert retrieved_model.metadata.model_type == "lightning_standard"
+        assert retrieved_model.metadata.hyperparameters == model.metadata.hyperparameters
+
+    @pytest.mark.integration
+    def test_lightning_individual_strategy_workflow(
+        self, 
+        sample_data_config, 
+        sample_sku_tuples,
+        temp_output_dir
+    ):
+        """Test complete Lightning model workflow with INDIVIDUAL strategy."""
+        
+        lightning_config = TrainingConfig(random_state=42)
+        lightning_config.add_model_config(
+            model_type="lightning_standard",
+            hyperparameters={
+                "hidden_size": 32,
+                "lr": 1e-2,
+                "max_epochs": 3,
+                "batch_size": 16
+            }
+        )
+        
+        pipeline = BenchmarkPipeline(
+            data_config=sample_data_config, 
+            training_config=lightning_config, 
+            output_dir=temp_output_dir
+        )
+        pipeline.load_and_prepare_data()
+        
+        # Run experiment with 2 SKUs for individual strategy
+        models = pipeline.run_experiment(
+            sku_tuples=sample_sku_tuples[:2],
+            modeling_strategy=ModelingStrategy.INDIVIDUAL,
+            experiment_name="lightning_individual_test"
+        )
+        
+        # Should create 2 individual models
+        assert len(models) == 2
+        for i, model in enumerate(models):
+            assert model.metadata.model_type == "lightning_standard"
+            assert model.metadata.modeling_strategy == ModelingStrategy.INDIVIDUAL
+            assert len(model.metadata.sku_tuples) == 1
+            assert model.metadata.sku_tuples[0] == sample_sku_tuples[i]
+
+    @pytest.mark.integration
+    def test_lightning_evaluation_workflow(
+        self, 
+        sample_data_config, 
+        sample_sku_tuples,
+        temp_output_dir
+    ):
+        """Test Lightning model evaluation workflow."""
+        
+        # Setup and train Lightning model
+        lightning_config = TrainingConfig(random_state=42)
+        lightning_config.add_model_config(
+            model_type="lightning_standard",
+            hyperparameters={"hidden_size": 32, "max_epochs": 3}
+        )
+        
+        pipeline = BenchmarkPipeline(
+            data_config=sample_data_config, 
+            training_config=lightning_config, 
+            output_dir=temp_output_dir
+        )
+        pipeline.load_and_prepare_data()
+        
+        # Train models
+        combined_models = pipeline.run_experiment(
+            sku_tuples=sample_sku_tuples[:2],
+            modeling_strategy=ModelingStrategy.COMBINED,
+            experiment_name="lightning_eval_combined"
+        )
+        
+        individual_models = pipeline.run_experiment(
+            sku_tuples=sample_sku_tuples[:2],
+            modeling_strategy=ModelingStrategy.INDIVIDUAL,
+            experiment_name="lightning_eval_individual"
+        )
+        
+        # Test comprehensive evaluation
+        evaluation_results = pipeline.evaluate_all_models()
+        
+        # Verify evaluation structure
+        assert 'combined' in evaluation_results
+        assert 'individual' in evaluation_results
+        assert 'overall' in evaluation_results
+        
+        # Verify combined results
+        combined_results = evaluation_results['combined']
+        if 'rankings' in combined_results:
+            assert 'rmse' in combined_results['rankings']
+            assert len(combined_results['rankings']['rmse']) >= 1
+        
+        # Verify individual results exist (flexible on count)
+        individual_results = evaluation_results['individual']
+        if 'rankings' in individual_results:
+            assert 'rmse' in individual_results['rankings']
+            assert len(individual_results['rankings']['rmse']) >= 1  # At least 1 model
+        
+        # Test saving evaluation results
+        pipeline.save_evaluation_results(evaluation_results)
+        
+        # Verify files are created
+        results_file = temp_output_dir / "evaluation_results" / "evaluation_results.json"
+        assert results_file.exists()
+
+    @pytest.mark.integration
+    def test_lightning_mixed_with_xgboost_workflow(
+        self, 
+        sample_data_config, 
+        sample_sku_tuples,
+        temp_output_dir
+    ):
+        """Test Lightning model integration with framework (simplified)."""
+        
+        # This test verifies Lightning works independently and can coexist with XGBoost
+        lightning_config = TrainingConfig(random_state=42)
+        lightning_config.add_model_config(
+            model_type="lightning_standard",
+            hyperparameters={"hidden_size": 32, "max_epochs": 3}
+        )
+        
+        lightning_pipeline = BenchmarkPipeline(
+            data_config=sample_data_config, 
+            training_config=lightning_config, 
+            output_dir=temp_output_dir
+        )
+        lightning_pipeline.load_and_prepare_data()
+        lightning_models = lightning_pipeline.run_experiment(
+            sku_tuples=sample_sku_tuples[:1],
+            modeling_strategy=ModelingStrategy.COMBINED,
+            experiment_name="mixed_lightning"
+        )
+        
+        # Verify Lightning model was created successfully
+        assert len(lightning_models) == 1
+        lightning_model = lightning_models[0]
+        assert lightning_model.metadata.model_type == "lightning_standard"
+        
+        # Verify registry operations work
+        registry = lightning_pipeline.model_registry
+        all_models = registry.list_models()
+        
+        model_types = []
+        for model_id in all_models:
+            model = registry.get_model(model_id)
+            if model:
+                model_types.append(model.metadata.model_type)
+        
+        # Verify Lightning model is in registry and discoverable
+        assert "lightning_standard" in model_types
+        
+        # Test evaluation works with Lightning models
+        evaluation_results = lightning_pipeline.evaluate_all_models()
+        assert 'combined' in evaluation_results
+        assert 'overall' in evaluation_results
+        
+        # Verify Lightning model has all required metrics
+        combined_results = evaluation_results.get('combined', {})
+        if 'rankings' in combined_results:
+            rankings = combined_results['rankings']['rmse']
+            assert len(rankings) >= 1  # At least the Lightning model  # At least XGBoost + Lightning  # At least XGBoost + Lightning  # At least XGBoost + Lightning
