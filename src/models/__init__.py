@@ -8,11 +8,15 @@ Different model types can be easily added by implementing the BaseModel interfac
 from .base import BaseModel
 from .xgboost_standard import XGBoostStandardModel
 from .xgboost_quantile import XGBoostQuantileModel
+from .lightning_standard import LightningStandardModel
+from .lightning_quantile import LightningQuantileModel
 
 # Model registry mapping
 MODEL_REGISTRY = {
     "xgboost": XGBoostStandardModel,
     "xgboost_quantile": XGBoostQuantileModel,
+    "lightning_standard": LightningStandardModel,
+    "lightning_quantile": LightningQuantileModel,
 }
 
 
@@ -45,6 +49,8 @@ __all__ = [
     "BaseModel",
     "XGBoostStandardModel", 
     "XGBoostQuantileModel",
+    "LightningStandardModel",
+    "LightningQuantileModel",
     "get_model_class",
     "list_available_models"
 ]

@@ -536,3 +536,48 @@ class TestTrainingConfig:
         loaded_dict = json.loads(json_str)
         
         assert loaded_dict["random_state"] == 456
+
+    def test_multi_quantile_configuration(self):
+        """Test TrainingConfig with multi-quantile configuration."""
+        config = TrainingConfig()
+        
+        # Add multi-quantile configuration
+        config.add_model_config(
+            model_type="xgboost_quantile",
+            quantile_alphas=[0.1, 0.5, 0.9],
+            hyperparameters={"n_estimators": 100}
+        )
+        
+        model_config = config.get_model_config("xgboost_quantile")
+        assert model_config.quantile_alphas == [0.1, 0.5, 0.9]
+        assert model_config.quantile_alpha is None
+        assert model_config.effective_quantile_alphas == [0.1, 0.5, 0.9]
+        assert model_config.is_quantile_model is True
+    
+    def test_backward_compatibility_single_quantile(self):
+        """Test backward compatibility with single quantile_alpha."""
+        config = TrainingConfig()
+        
+        # Add single quantile configuration (old way)
+        config.add_model_config(
+            model_type="xgboost_quantile",
+            quantile_alpha=0.7,
+            hyperparameters={"n_estimators": 100}
+        )
+        
+        model_config = config.get_model_config("xgboost_quantile")
+        assert model_config.quantile_alpha == 0.7
+        assert model_config.quantile_alphas is None
+        assert model_config.effective_quantile_alphas == [0.7]
+        assert model_config.is_quantile_model is True
+    
+    def test_quantile_conflict_validation(self):
+        """Test validation prevents conflicting quantile parameters."""
+        config = TrainingConfig()
+        
+        with pytest.raises(ValueError, match="Cannot specify both quantile_alpha and quantile_alphas"):
+            config.add_model_config(
+                model_type="xgboost_quantile",
+                quantile_alpha=0.5,
+                quantile_alphas=[0.1, 0.9]
+            )

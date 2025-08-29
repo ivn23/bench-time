@@ -7,7 +7,7 @@ using the M5 competition dataset.
 
 from .data_structures import (
     ModelingStrategy, SkuTuple, SkuList, ModelMetadata, DataSplit, BenchmarkModel, 
-    ModelRegistry, DataConfig, TrainingConfig
+    ModelRegistry, DataConfig, TrainingConfig, ModelTypeConfig
 )
 
 from .data_loading import DataLoader
@@ -27,7 +27,8 @@ __all__ = [
     "BenchmarkModel",
     "ModelRegistry",
     "DataConfig",
-    "TrainingConfig", 
+    "TrainingConfig",
+    "ModelTypeConfig", 
     "DataLoader",
     "ModelTrainer",
     "ModelEvaluator",

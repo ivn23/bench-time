@@ -46,6 +46,7 @@ class ModelMetadata:
     # Additional metadata for hierarchical storage
     model_instance: str = "default"
     storage_location: Optional[str] = None  # Full storage path
+    quantile_level: Optional[float] = None  # Quantile level for quantile models
     
     @classmethod
     def from_sku_tuple(cls, sku_tuple: SkuTuple, model_type: str, **kwargs) -> 'ModelMetadata':
@@ -102,7 +103,8 @@ class BenchmarkModel:
             store_id=self.metadata.store_id,
             product_id=self.metadata.product_id,
             model_type=self.metadata.model_type,
-            model_instance=self.metadata.model_instance
+            model_instance=self.metadata.model_instance,
+            quantile_level=self.metadata.quantile_level  # Include quantile level in storage location
         )
 
 
@@ -173,6 +175,7 @@ class ModelRegistry:
             "product_id": model.metadata.product_id,
             "model_instance": model.metadata.model_instance,
             "storage_location": model.metadata.storage_location,
+            "quantile_level": model.metadata.quantile_level,  # Add quantile level to saved metadata
             "hyperparameters": model.metadata.hyperparameters,
             "training_config": make_json_serializable(model.metadata.training_config),
             "performance_metrics": model.metadata.performance_metrics,
@@ -400,7 +403,38 @@ class ModelTypeConfig:
     model_type: str
     hyperparameters: Dict[str, Any] = field(default_factory=dict)
     model_specific_params: Dict[str, Any] = field(default_factory=dict)
-    quantile_alpha: Optional[float] = None  # For quantile models
+    quantile_alpha: Optional[float] = None  # For backward compatibility
+    quantile_alphas: Optional[List[float]] = None  # For multiple quantile levels
+    
+    def __post_init__(self):
+        """Validate quantile configuration after initialization."""
+        # Validate quantile ranges
+        if self.quantile_alphas is not None:
+            for alpha in self.quantile_alphas:
+                if not (0 < alpha < 1):
+                    raise ValueError(f"quantile_alpha must be between 0 and 1, got {alpha}")
+        
+        if self.quantile_alpha is not None:
+            if not (0 < self.quantile_alpha < 1):
+                raise ValueError(f"quantile_alpha must be between 0 and 1, got {self.quantile_alpha}")
+        
+        # Handle quantile compatibility
+        if self.quantile_alpha is not None and self.quantile_alphas is not None:
+            raise ValueError("Cannot specify both quantile_alpha and quantile_alphas")
+    
+    @property
+    def effective_quantile_alphas(self) -> Optional[List[float]]:
+        """Get the effective list of quantile alphas (backward compatibility)."""
+        if self.quantile_alphas is not None:
+            return self.quantile_alphas
+        elif self.quantile_alpha is not None:
+            return [self.quantile_alpha]
+        return None
+    
+    @property
+    def is_quantile_model(self) -> bool:
+        """Check if this configuration represents a quantile model."""
+        return self.quantile_alpha is not None or self.quantile_alphas is not None
     
     def merge_with_defaults(self) -> Dict[str, Any]:
         """Merge config hyperparameters with model type defaults."""
@@ -433,6 +467,11 @@ class TrainingConfig:
         """Add or update configuration for a specific model type."""
         config_dict = {'model_type': model_type}
         config_dict.update(kwargs)
+        
+        # Handle quantile lists for backward compatibility
+        if 'quantile_alphas' in kwargs and 'quantile_alpha' in kwargs:
+            raise ValueError("Cannot specify both quantile_alpha and quantile_alphas")
+        
         self.model_configs[model_type] = ModelTypeConfig(**config_dict)
         
         # Automatically add model type to model selection if not already present

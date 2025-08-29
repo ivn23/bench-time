@@ -20,15 +20,29 @@ class ModelStorageLocation:
     product_id: int
     model_type: str
     model_instance: str = "default"
+    quantile_level: Optional[float] = None  # New quantile level support
     
-    def to_path_components(self) -> Tuple[str, str, str, str]:
-        """Convert to path components (store_id, product_id, model_type, instance)."""
+    def __post_init__(self):
+        """Validate quantile level after initialization."""
+        if self.quantile_level is not None and not (0 < self.quantile_level < 1):
+            raise ValueError(f"quantile_level must be between 0 and 1, got {self.quantile_level}")
+    
+    def to_path_components(self) -> Tuple[str, str, str, str, str]:
+        """Convert to path components (store_id, product_id, model_type, quantile_level, instance)."""
+        quantile_component = self._format_quantile_component()
         return (
             self._sanitize_path_component(str(self.store_id)),
             self._sanitize_path_component(str(self.product_id)),
             self._sanitize_path_component(self.model_type),
+            self._sanitize_path_component(quantile_component),
             self._sanitize_path_component(self.model_instance)
         )
+    
+    def _format_quantile_component(self) -> str:
+        """Format quantile level for use in directory names."""
+        if self.quantile_level is not None:
+            return f"q{self.quantile_level:.3f}".rstrip('0').rstrip('.')
+        return "standard"  # Default for non-quantile models
     
     @staticmethod
     def _sanitize_path_component(component: str) -> str:
@@ -43,13 +57,27 @@ class ModelStorageLocation:
     @classmethod
     def from_sku_tuple(cls, sku_tuple: SkuTuple, model_type: str, 
                       model_instance: str = "default") -> 'ModelStorageLocation':
-        """Create storage location from SKU tuple."""
+        """Create storage location from SKU tuple (backward compatibility)."""
         product_id, store_id = sku_tuple
         return cls(
             store_id=store_id,
             product_id=product_id,
             model_type=model_type,
             model_instance=model_instance
+        )
+    
+    @classmethod
+    def from_sku_tuple_with_quantile(cls, sku_tuple: SkuTuple, model_type: str,
+                                   quantile_level: Optional[float] = None,
+                                   model_instance: str = "default") -> 'ModelStorageLocation':
+        """Create storage location from SKU tuple with quantile level."""
+        product_id, store_id = sku_tuple
+        return cls(
+            store_id=store_id,
+            product_id=product_id,
+            model_type=model_type,
+            model_instance=model_instance,
+            quantile_level=quantile_level
         )
 
 
@@ -62,9 +90,9 @@ class HierarchicalStorageManager:
     
     def create_model_path(self, location: ModelStorageLocation) -> Path:
         """Generate full hierarchical path for a model storage location."""
-        store_dir, product_dir, model_type_dir, instance_dir = location.to_path_components()
+        store_dir, product_dir, model_type_dir, quantile_dir, instance_dir = location.to_path_components()
         
-        return self.models_path / store_dir / product_dir / model_type_dir / instance_dir
+        return self.models_path / store_dir / product_dir / model_type_dir / quantile_dir / instance_dir
     
     def ensure_model_directory(self, location: ModelStorageLocation) -> Path:
         """Create directory hierarchy for model storage and return the path."""
@@ -75,23 +103,33 @@ class HierarchicalStorageManager:
     def parse_model_path(self, model_path: Path) -> Optional[ModelStorageLocation]:
         """Extract storage location information from a model path."""
         try:
-            # Expect path like: base/models/store_id/product_id/model_type/instance
+            # Expect path like: base/models/store_id/product_id/model_type/quantile_level/instance
             relative_path = model_path.relative_to(self.models_path)
             parts = relative_path.parts
             
-            if len(parts) < 4:
+            if len(parts) < 5:
                 return None
                 
             store_id = int(parts[0])
             product_id = int(parts[1])
             model_type = parts[2]
-            model_instance = parts[3] if len(parts) > 3 else "default"
+            quantile_str = parts[3]
+            model_instance = parts[4] if len(parts) > 4 else "default"
+            
+            # Parse quantile level
+            quantile_level = None
+            if quantile_str.startswith('q') and quantile_str != "qstandard":
+                try:
+                    quantile_level = float(quantile_str[1:])
+                except ValueError:
+                    pass
             
             return ModelStorageLocation(
                 store_id=store_id,
                 product_id=product_id,
                 model_type=model_type,
-                model_instance=model_instance
+                model_instance=model_instance,
+                quantile_level=quantile_level
             )
         except (ValueError, IndexError):
             return None
