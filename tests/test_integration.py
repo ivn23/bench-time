@@ -46,7 +46,7 @@ class TestPipelineIntegration:
         # Check model metadata
         assert model.metadata.modeling_strategy == ModelingStrategy.COMBINED
         assert model.metadata.sku_tuples == sample_sku_tuples
-        assert model.metadata.model_type == "xgboost"
+        assert model.metadata.model_type == "xgboost_standard"
         assert len(model.metadata.feature_columns) > 0
         assert model.metadata.target_column == "target"
         
@@ -105,7 +105,7 @@ class TestPipelineIntegration:
         # Check model metadata
         assert model.metadata.modeling_strategy == ModelingStrategy.INDIVIDUAL
         assert model.metadata.sku_tuples == single_sku_tuple
-        assert model.metadata.model_type == "xgboost"
+        assert model.metadata.model_type == "xgboost_standard"
         
         # Check model registry
         all_model_ids = pipeline.model_registry.list_models()
@@ -341,8 +341,10 @@ class TestPipelineIntegration:
     ):
         """Test complete workflow with quantile XGBoost model."""
         # Configure quantile model training
-        quantile_training_config = TrainingConfig(
-            validation_split=0.2,
+        quantile_training_config = TrainingConfig(random_state=42)
+        
+        # Add quantile model configuration
+        quantile_training_config.add_model_config(
             model_type="xgboost_quantile",
             quantile_alpha=0.75,
             hyperparameters={
@@ -416,8 +418,9 @@ class TestPipelineIntegration:
         
         try:
             # Train standard XGBoost model
-            standard_config = TrainingConfig(
-                model_type="xgboost",
+            standard_config = TrainingConfig(random_state=42)
+            standard_config.add_model_config(
+                model_type="xgboost_standard",
                 hyperparameters={"n_estimators": 10, "max_depth": 4}
             )
             
@@ -435,7 +438,8 @@ class TestPipelineIntegration:
             )
             
             # Train quantile XGBoost model
-            quantile_config = TrainingConfig(
+            quantile_config = TrainingConfig(random_state=42)
+            quantile_config.add_model_config(
                 model_type="xgboost_quantile",
                 quantile_alpha=0.7,
                 hyperparameters={"max_depth": 4, "learning_rate": 0.3}
@@ -461,7 +465,7 @@ class TestPipelineIntegration:
             standard_model = standard_models[0]
             quantile_model = quantile_models[0]
             
-            assert standard_model.metadata.model_type == "xgboost"
+            assert standard_model.metadata.model_type == "xgboost_standard"
             assert quantile_model.metadata.model_type == "xgboost_quantile"
             
             # Check different metrics are present
@@ -494,7 +498,7 @@ class TestPipelineIntegration:
             standard_loaded = pipeline_standard.model_registry.get_model(standard_models_list[0])
             quantile_loaded = pipeline_quantile.model_registry.get_model(quantile_models_list[0])
             
-            assert standard_loaded.metadata.model_type == "xgboost"
+            assert standard_loaded.metadata.model_type == "xgboost_standard"
             assert quantile_loaded.metadata.model_type == "xgboost_quantile"
             
         finally:

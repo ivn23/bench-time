@@ -15,6 +15,7 @@ from src import (
     ModelingStrategy, SkuTuple, SkuList, ModelMetadata, DataSplit, 
     BenchmarkModel, ModelRegistry, DataConfig, TrainingConfig
 )
+from src.data_structures import ModelSelectionConfig
 
 
 @pytest.fixture
@@ -491,62 +492,47 @@ class TestTrainingConfig:
     def test_training_config_creation(self):
         """Test creating TrainingConfig instance."""
         config = TrainingConfig(
-            validation_split=0.3,
-            random_state=123,
-            cv_folds=3,
-            model_type="xgboost",
-            hyperparameters={"n_estimators": 200, "max_depth": 8},
-            model_params={"subsample": 0.9}
+            random_state=123
         )
         
-        assert config.validation_split == 0.3
         assert config.random_state == 123
-        assert config.cv_folds == 3
-        assert config.model_type == "xgboost"
-        assert config.hyperparameters["n_estimators"] == 200
-        assert config.model_params["subsample"] == 0.9
+        assert isinstance(config.model_selection, ModelSelectionConfig)
+        assert config.model_configs == {}
 
     def test_training_config_defaults(self):
         """Test TrainingConfig default values."""
         config = TrainingConfig()
         
         # Check defaults
-        assert config.validation_split == 0.2
         assert config.random_state == 42
-        assert config.cv_folds == 5
-        assert config.model_type == "xgboost"
-        # Should have default XGBoost hyperparameters
-        expected_defaults = {
-            'n_estimators': 100,
-            'max_depth': 6,
-            'learning_rate': 0.3,
-            'subsample': 1.0,
-            'colsample_bytree': 1.0,
-            'reg_alpha': 0.0,
-            'reg_lambda': 1.0,
-        }
-        assert config.hyperparameters == expected_defaults
-        assert config.model_params == {}
+        assert isinstance(config.model_selection, ModelSelectionConfig)
+        assert config.model_configs == {}
 
     def test_training_config_serialization(self):
         """Test TrainingConfig can be serialized."""
         config = TrainingConfig(
-            validation_split=0.25,
-            random_state=456,
-            model_type="xgboost",
+            random_state=456
+        )
+        
+        # Add a model config
+        config.add_model_config(
+            model_type="xgboost_standard",
             hyperparameters={"n_estimators": 150}
         )
         
         # Convert to dict (as done in model training)
         config_dict = config.__dict__
         
-        assert config_dict["validation_split"] == 0.25
         assert config_dict["random_state"] == 456
-        assert config_dict["hyperparameters"]["n_estimators"] == 150
+        assert "xgboost_standard" in config_dict["model_configs"]
         
-        # Should be JSON serializable
-        json_str = json.dumps(config_dict, default=str)
+        # Should be JSON serializable with helper function
+        def make_serializable(obj):
+            if hasattr(obj, '__dict__'):
+                return obj.__dict__
+            return str(obj)
+        
+        json_str = json.dumps(config_dict, default=make_serializable)
         loaded_dict = json.loads(json_str)
         
-        assert loaded_dict["validation_split"] == 0.25
         assert loaded_dict["random_state"] == 456

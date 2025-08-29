@@ -108,11 +108,6 @@ Implement a hierarchical storage system organized by business entities:
 - Ensure model registration uses new path structure
 - Add validation for store/product consistency in sku_tuples
 
-### 8. Implement Backward Compatibility
-- Create `ModelMigration` class for converting old model storage to new format
-- Add detection logic for old vs new storage formats
-- Implement automatic migration on first load of old models
-- Provide migration validation and rollback capabilities
 
 ### 9. Update Model Loading/Saving Logic
 - Modify model file structure within model type directories

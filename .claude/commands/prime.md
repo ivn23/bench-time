@@ -7,10 +7,12 @@ eza . --tree --all
 
 ## Read the following files
 > Read the files below and nothing else.
+> Don't write any code here
 
 README.md
 context/comprehensive_code_analysis.md
 context/test_overview.md
+
 Read the claude.md root file before you do anything.
 
 Always use:
@@ -22,3 +24,6 @@ If you encouter requests for for directories that you can not see using serena, 
 
 Rules for created notebooks:
 - dont use unnecessary print statements. If you use print statements than only to show information about created variables, their values and other usefull information that a data scientist would like to know.
+
+
+

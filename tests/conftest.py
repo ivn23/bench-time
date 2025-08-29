@@ -57,7 +57,8 @@ def sample_data_config(temp_data_dir):
         date_column="date",
         target_column="target",
         bdid_column="bdID",
-        remove_not_for_sale=True
+        remove_not_for_sale=True,
+        validation_split=0.2  # Moved from TrainingConfig
     )
 
 @pytest.fixture
@@ -77,10 +78,11 @@ def sample_data_config_with_split_date(temp_data_dir):
 @pytest.fixture
 def sample_training_config():
     """Create TrainingConfig for testing."""
-    return TrainingConfig(
-        validation_split=0.2,
-        random_state=42,
-        model_type="xgboost",
+    config = TrainingConfig(random_state=42)
+    
+    # Add model configuration using new extensible architecture
+    config.add_model_config(
+        model_type="xgboost_standard",
         hyperparameters={
             "n_estimators": 10,  # Small for fast testing
             "max_depth": 3,
@@ -89,6 +91,8 @@ def sample_training_config():
             "n_jobs": 1  # Pin parallelism for reproducible tests
         }
     )
+    
+    return config
 
 @pytest.fixture
 def sample_sku_tuples():

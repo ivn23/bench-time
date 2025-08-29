@@ -76,8 +76,15 @@ class ModelEvaluator:
         y_pred = model.model.predict(X_test)
         y_pred = np.clip(np.round(y_pred).astype(int), 0, None)
         
-        # Calculate comprehensive metrics
-        metrics = self._calculate_comprehensive_metrics(y_test, y_pred)
+        # Calculate metrics using centralized metrics calculator
+        from .metrics import MetricsCalculator
+        
+        # Check if this is a quantile model to determine quantile_alpha
+        quantile_alpha = None
+        if hasattr(model.model, 'quantile_alpha'):
+            quantile_alpha = model.model.quantile_alpha
+        
+        metrics = MetricsCalculator.calculate_all_metrics(y_test, y_pred, quantile_alpha)
         
         # Create evaluation result
         evaluation_result = {
@@ -126,23 +133,18 @@ class ModelEvaluator:
         
         # Make predictions using the underlying model object
         underlying_model = model.model
+        y_pred = underlying_model.predict(X_test)
+        y_pred = np.clip(np.round(y_pred).astype(int), 0, None)
         
-        # Check if this is a new extensible model or legacy model
-        if hasattr(underlying_model, 'predict') and hasattr(underlying_model, 'get_evaluation_metrics'):
-            # New extensible model interface
-            y_pred = underlying_model.predict(X_test)
-            
-            # Use model-specific metrics
-            try:
-                model_metrics = underlying_model.get_evaluation_metrics(y_test, y_pred)
-            except Exception as e:
-                logger.warning(f"Failed to get model-specific metrics: {e}. Using standard metrics.")
-                model_metrics = self._calculate_comprehensive_metrics(y_test, y_pred)
-        else:
-            # Legacy model (sklearn interface)
-            y_pred = underlying_model.predict(X_test)
-            y_pred = np.clip(np.round(y_pred).astype(int), 0, None)
-            model_metrics = self._calculate_comprehensive_metrics(y_test, y_pred)
+        # Calculate metrics using centralized metrics calculator
+        from .metrics import MetricsCalculator
+        
+        # Check if this is a quantile model to determine quantile_alpha
+        quantile_alpha = None
+        if hasattr(underlying_model, 'quantile_alpha'):
+            quantile_alpha = underlying_model.quantile_alpha
+        
+        model_metrics = MetricsCalculator.calculate_all_metrics(y_test, y_pred, quantile_alpha)
         
         # Create evaluation result
         evaluation_result = {
@@ -290,34 +292,6 @@ class ModelEvaluator:
         
         return report_text
     
-    def _calculate_comprehensive_metrics(self, y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
-        """Calculate comprehensive evaluation metrics."""
-        metrics = {
-            'mse': mean_squared_error(y_true, y_pred),
-            'rmse': np.sqrt(mean_squared_error(y_true, y_pred)),
-            'mae': mean_absolute_error(y_true, y_pred),
-            'r2': r2_score(y_true, y_pred)
-        }
-        
-        # MAPE (Mean Absolute Percentage Error)
-        non_zero_mask = y_true != 0
-        if np.any(non_zero_mask):
-            metrics['mape'] = np.mean(np.abs((y_true[non_zero_mask] - y_pred[non_zero_mask]) / y_true[non_zero_mask])) * 100
-        else:
-            metrics['mape'] = float('inf')
-        
-        # Additional metrics
-        metrics['max_error'] = np.max(np.abs(y_true - y_pred))
-        metrics['mean_error'] = np.mean(y_true - y_pred)  # Bias
-        metrics['std_error'] = np.std(y_true - y_pred)
-        
-        # Percentage of predictions within certain error ranges
-        abs_errors = np.abs(y_true - y_pred)
-        metrics['within_1_unit'] = np.mean(abs_errors <= 1.0) * 100
-        metrics['within_2_units'] = np.mean(abs_errors <= 2.0) * 100
-        metrics['within_5_units'] = np.mean(abs_errors <= 5.0) * 100
-        
-        return metrics
     
     def _get_feature_importance(self, model: BenchmarkModel) -> Optional[Dict[str, float]]:
         """Extract feature importance from model if available."""

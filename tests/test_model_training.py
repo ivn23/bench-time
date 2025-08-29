@@ -19,7 +19,8 @@ class TestModelTrainer:
         trainer = ModelTrainer(sample_training_config)
         
         assert trainer.config == sample_training_config
-        assert trainer.config.model_type == "xgboost"
+        # TrainingConfig no longer has model_type directly - it's in model_configs
+        assert isinstance(trainer.config.model_configs, dict)
 
     def test_train_model_combined_strategy(
         self, 
@@ -51,14 +52,15 @@ class TestModelTrainer:
             feature_cols=feature_cols,
             target_col="target",
             modeling_strategy=ModelingStrategy.COMBINED,
-            sku_tuples=sample_sku_tuples
+            sku_tuples=sample_sku_tuples,
+            model_type="xgboost_standard"  # Added required parameter
         )
         
         # Validate returned model
         assert isinstance(model, BenchmarkModel)
         assert model.metadata.modeling_strategy == ModelingStrategy.COMBINED
         assert model.metadata.sku_tuples == sample_sku_tuples
-        assert model.metadata.model_type == "xgboost"
+        assert model.metadata.model_type == "xgboost_standard"  # Updated expected value
         assert model.metadata.feature_columns == feature_cols
         assert model.metadata.target_column == "target"
         
@@ -74,19 +76,18 @@ class TestModelTrainer:
         assert len(model.data_split.train_bdIDs) > 0
         assert len(model.data_split.validation_bdIDs) > 0
         
-        # Check performance metrics
+        # Check performance metrics - now using centralized metrics
         metrics = model.metadata.performance_metrics
-        assert "mse" in metrics
-        assert "rmse" in metrics
-        assert "mae" in metrics
-        assert "r2" in metrics
-        assert "mape" in metrics
+        expected_metrics = ["mse", "rmse", "mae", "r2", "mape", "max_error", "mean_error", "std_error",
+                           "within_1_unit", "within_2_units", "within_5_units"]
+        for metric in expected_metrics:
+            assert metric in metrics
         
         # Metrics should be reasonable numbers
         assert metrics["mse"] >= 0
         assert metrics["rmse"] >= 0
         assert metrics["mae"] >= 0
-        assert -1 <= metrics["r2"] <= 1  # R² can be negative for very poor models
+        assert -1 <= metrics["r2"] <= 1  # R² can be negative for very poor models  # R² can be negative for very poor models
 
     def test_train_model_individual_strategy(
         self, 
@@ -215,17 +216,18 @@ class TestModelTrainer:
             )
 
     def test_metrics_calculation(self, sample_training_config):
-        """Test metrics calculation functionality."""
-        trainer = ModelTrainer(sample_training_config)
+        """Test centralized metrics calculation functionality."""
+        from src.metrics import MetricsCalculator
         
         # Create simple test data for metrics
         y_true = np.array([1, 2, 3, 4, 5])
         y_pred = np.array([1.1, 1.9, 3.2, 3.8, 5.1])
         
-        metrics = trainer._calculate_metrics(y_true, y_pred)
+        metrics = MetricsCalculator.calculate_regression_metrics(y_true, y_pred)
         
         # Check all expected metrics are present
-        expected_metrics = ["mse", "rmse", "mae", "r2", "mape"]
+        expected_metrics = ["mse", "rmse", "mae", "r2", "mape", "max_error", "mean_error", "std_error", 
+                           "within_1_unit", "within_2_units", "within_5_units"]
         for metric in expected_metrics:
             assert metric in metrics
             assert isinstance(metrics[metric], (int, float))
@@ -238,8 +240,15 @@ class TestModelTrainer:
         y_true_with_zero = np.array([0, 1, 2, 3])
         y_pred_with_zero = np.array([0.1, 1.1, 1.9, 3.1])
         
-        metrics_with_zero = trainer._calculate_metrics(y_true_with_zero, y_pred_with_zero)
+        metrics_with_zero = MetricsCalculator.calculate_regression_metrics(y_true_with_zero, y_pred_with_zero)
         assert "mape" in metrics_with_zero
+        
+        # Test quantile metrics calculation
+        quantile_metrics = MetricsCalculator.calculate_quantile_metrics(y_true, y_pred, 0.7)
+        expected_quantile_metrics = ["quantile_score", "coverage_probability", "coverage_error", "quantile_alpha"]
+        for metric in expected_quantile_metrics:
+            assert metric in quantile_metrics
+            assert isinstance(quantile_metrics[metric], (int, float))
         # MAPE should handle zero values appropriately
 
     def test_model_metadata_creation(self, sample_training_config, prepared_model_data, sample_sku_tuples):

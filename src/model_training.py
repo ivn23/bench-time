@@ -32,7 +32,8 @@ class ModelTrainer:
                    feature_cols: List[str],
                    target_col: str,
                    modeling_strategy: ModelingStrategy,
-                   sku_tuples: SkuList) -> BenchmarkModel:
+                   sku_tuples: SkuList,
+                   model_type: str) -> BenchmarkModel:
         """
         Train a model with fixed hyperparameters using model factory pattern.
         
@@ -43,11 +44,12 @@ class ModelTrainer:
             target_col: Target column name
             modeling_strategy: How SKUs are being modeled (combined vs individual)
             sku_tuples: List of (product_id, store_id) tuples being modeled
+            model_type: Type of model to train
             
         Returns:
             Trained BenchmarkModel
         """
-        logger.info(f"Training {self.config.model_type} model with {modeling_strategy.value} strategy for {len(sku_tuples)} SKU(s)")
+        logger.info(f"Training {model_type} model with {modeling_strategy.value} strategy for {len(sku_tuples)} SKU(s)")
         
         # Convert to numpy arrays for training
         X_train_np = X_train.select(feature_cols).to_numpy()
@@ -55,47 +57,54 @@ class ModelTrainer:
         X_test_np = X_test.select(feature_cols).to_numpy()
         y_test_np = y_test.select(target_col).to_numpy().flatten()
         
-        # Get hyperparameters from config
-        hyperparameters = self.config.hyperparameters.copy()
-        # Merge with any additional model_params
-        hyperparameters.update(self.config.model_params)
+        # Get model-specific configuration
+        model_config = self.config.get_model_config(model_type)
+        hyperparameters = model_config.merge_with_defaults()
+        
         # Ensure random_state is set
         hyperparameters['random_state'] = self.config.random_state
         
         logger.info(f"Using hyperparameters: {hyperparameters}")
         
         # Log model-specific parameters
-        if self.config.quantile_alpha is not None:
-            logger.info(f"Quantile alpha: {self.config.quantile_alpha}")
+        if model_config.quantile_alpha is not None:
+            logger.info(f"Quantile alpha: {model_config.quantile_alpha}")
         
         # Train model with fixed hyperparameters using model factory
         final_model = self._train_model_with_params(
-            X_train_np, y_train_np, hyperparameters, self.config.model_type,
-            X_val=X_test_np, y_val=y_test_np, quantile_alpha=self.config.quantile_alpha
+            X_train_np, y_train_np, hyperparameters, model_type,
+            X_val=X_test_np, y_val=y_test_np, quantile_alpha=model_config.quantile_alpha
         )
         
-        # Evaluate on test set using model-specific evaluation
+        # Make predictions on test set
         test_predictions = final_model.predict(X_test_np)
         
-        # Get metrics using model-specific evaluation if available
-        if hasattr(final_model, 'get_evaluation_metrics'):
-            metrics = final_model.get_evaluation_metrics(y_test_np, test_predictions)
-        else:
-            # Fallback to legacy metrics calculation
-            test_predictions = np.clip(np.round(test_predictions).astype(int), 0, None)
-            metrics = self._calculate_metrics(y_test_np, test_predictions)
+        # Apply prediction clipping for integer targets
+        test_predictions = np.clip(np.round(test_predictions).astype(int), 0, None)
         
-        # Create model metadata with enhanced info
-        model_id_parts = [modeling_strategy.value, f"{len(sku_tuples)}skus", self.config.model_type]
-        if self.config.quantile_alpha is not None:
-            model_id_parts.append(f"q{self.config.quantile_alpha}")
+        # Calculate metrics using centralized metrics calculator
+        from .metrics import MetricsCalculator
+        metrics = MetricsCalculator.calculate_all_metrics(
+            y_test_np, test_predictions, model_config.quantile_alpha
+        )
+        
+        # Extract primary SKU for hierarchical storage
+        primary_sku = sku_tuples[0]  # Use first SKU as primary
+        product_id, store_id = primary_sku
+        
+        # Create model metadata with hierarchical storage support
+        model_id_parts = [modeling_strategy.value, f"{len(sku_tuples)}skus", model_type]
+        if model_config.quantile_alpha is not None:
+            model_id_parts.append(f"q{model_config.quantile_alpha}")
         model_id = "_".join(model_id_parts)
         
         metadata = ModelMetadata(
             model_id=model_id,
             modeling_strategy=modeling_strategy,
             sku_tuples=sku_tuples,
-            model_type=self.config.model_type,
+            model_type=model_type,
+            store_id=store_id,
+            product_id=product_id,
             hyperparameters=hyperparameters,
             training_config=self.config.__dict__,
             performance_metrics=metrics,
@@ -129,23 +138,29 @@ class ModelTrainer:
                                 quantile_alpha: float = None) -> Any:
         """Train model with specified hyperparameters using model factory."""
         try:
-            # Import the model factory
-            from .models import get_model_class
+            # Import the model type registry
+            from .model_types import model_registry
             
             # Get the appropriate model class
-            model_class = get_model_class(model_type)
+            model_class = model_registry.get_model_class(model_type)
+            if model_class is None:
+                raise ValueError(f"Unknown model type: {model_type}")
             
             # Prepare model parameters
             model_params = hyperparameters.copy()
             
-            # Add quantile parameter for quantile models
-            if model_type == "xgboost_quantile" and quantile_alpha is not None:
+            # Add quantile parameter for quantile models if required
+            if model_registry.requires_quantile(model_type) and quantile_alpha is not None:
                 model_instance = model_class(quantile_alpha=quantile_alpha, **model_params)
             else:
                 model_instance = model_class(**model_params)
             
             # Train the model
-            model_instance.train(X_train, y_train, X_val, y_val)
+            if hasattr(model_instance, 'train'):
+                model_instance.train(X_train, y_train, X_val, y_val)
+            else:
+                # Fallback to fit method for scikit-learn compatible models
+                model_instance.fit(X_train, y_train)
             
             return model_instance
             
@@ -153,21 +168,4 @@ class ModelTrainer:
             logger.error(f"Failed to train model type '{model_type}': {str(e)}")
             raise
     
-    def _calculate_metrics(self, y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
-        """Calculate evaluation metrics."""
-        metrics = {
-            'mse': mean_squared_error(y_true, y_pred),
-            'rmse': np.sqrt(mean_squared_error(y_true, y_pred)),
-            'mae': mean_absolute_error(y_true, y_pred),
-            'r2': r2_score(y_true, y_pred)
-        }
-        
-        # MAPE (Mean Absolute Percentage Error)
-        non_zero_mask = y_true != 0
-        if np.any(non_zero_mask):
-            metrics['mape'] = np.mean(np.abs((y_true[non_zero_mask] - y_pred[non_zero_mask]) / y_true[non_zero_mask])) * 100
-        else:
-            metrics['mape'] = float('inf')
-            
-        return metrics
 

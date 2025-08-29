@@ -71,20 +71,6 @@ class BaseModel(ABC):
         """
         pass
         
-    @abstractmethod
-    def get_evaluation_metrics(self, y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
-        """
-        Calculate model-specific evaluation metrics.
-        
-        Args:
-            y_true: True target values
-            y_pred: Predicted values
-            
-        Returns:
-            Dictionary of metric names and values
-        """
-        pass
-        
     def is_model_trained(self) -> bool:
         """Check if model has been trained."""
         return self.is_trained

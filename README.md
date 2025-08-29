@@ -1,20 +1,24 @@
 # M5 Time Series Benchmarking Framework
 
-A production-ready, tuple-based framework for time series forecasting on M5 competition data. Features two modeling strategies (COMBINED and INDIVIDUAL), comprehensive evaluation capabilities, and robust model persistence with complete experiment tracking.
+A production-ready, tuple-based framework for time series forecasting on M5 competition data. Features dual modeling strategies (COMBINED and INDIVIDUAL), centralized metrics calculation, dynamic model discovery, quantile regression support, and comprehensive model lifecycle management with complete experiment tracking.
 
 ## Key Features
 
 **Tuple-Based Modeling**: Work with SKU tuples (product_id, store_id pairs) representing individual store-product combinations. Choose between COMBINED strategy (one model for all SKUs) or INDIVIDUAL strategy (separate models per SKU).
 
-**Fixed Hyperparameter Training**: Direct hyperparameter specification eliminates optimization complexity, enabling rapid experimentation with XGBoost models using predetermined parameters.
+**Centralized Metrics System**: Unified MetricsCalculator provides consistent evaluation across all models with comprehensive metrics including MSE, RMSE, MAE, R², MAPE, accuracy bands, and quantile-specific metrics.
 
-**Comprehensive Evaluation**: Multi-metric evaluation (MSE, RMSE, MAE, R², MAPE, accuracy bands) with model comparison, ranking, and markdown report generation.
+**Dynamic Model Discovery**: Plugin architecture with ModelTypeRegistry automatically discovers and registers available model types, supporting both standard and quantile XGBoost implementations.
 
-**Temporal Data Handling**: Supports both percentage-based and date-based temporal splitting strategies for proper time series validation.
+**Quantile Regression Support**: Native support for quantile models with coverage probability analysis for uncertainty quantification and risk assessment.
 
-**Production-Ready Persistence**: Complete model registry with metadata tracking, experiment logging, and full save/load capabilities for reproducible research.
+**Fixed Hyperparameter Training**: Direct hyperparameter specification eliminates optimization complexity, enabling rapid experimentation cycles with predetermined parameters.
 
-**Memory-Efficient Processing**: Polars LazyFrame integration provides efficient handling of large M5 datasets with lazy evaluation support.
+**Hierarchical Model Storage**: Organized model persistence with complete metadata tracking, data splits preservation, and intelligent directory naming for easy model management.
+
+**Temporal Data Handling**: Supports both percentage-based and date-based temporal splitting strategies for proper time series validation with full reproducibility.
+
+**Memory-Efficient Processing**: Polars LazyFrame integration provides efficient handling of large M5 datasets with lazy evaluation support and smart caching.
 
 ## Architecture Overview
 
@@ -22,18 +26,28 @@ A production-ready, tuple-based framework for time series forecasting on M5 comp
 src/
 ├── data_structures.py      # Core data models: ModelingStrategy enum, SKU tuples, configurations
 ├── data_loading.py          # Polars-based data loading with tuple filtering
-├── model_training.py        # XGBoost training with fixed hyperparameters
+├── model_training.py        # Model training coordination with factory pattern
 ├── evaluation.py            # Comprehensive evaluation and visualization
-└── benchmark_pipeline.py    # End-to-end orchestration and workflow management
+├── benchmark_pipeline.py    # End-to-end orchestration and workflow management
+├── metrics.py              # Centralized metrics calculation system
+├── model_types.py          # Dynamic model discovery and registration
+├── storage_utils.py        # Hierarchical model storage utilities
+└── models/
+    ├── base.py             # Abstract base model interface
+    ├── xgboost_standard.py # Standard XGBoost implementation
+    └── xgboost_quantile.py # Quantile XGBoost implementation
 ```
 
 **Core Components:**
 
 - **ModelingStrategy**: COMBINED (unified model) vs INDIVIDUAL (per-SKU models)
 - **DataLoader**: Efficient tuple-based data filtering and temporal splitting
-- **ModelTrainer**: Fixed hyperparameter training for rapid experimentation
-- **ModelEvaluator**: Multi-metric evaluation with comparison capabilities
+- **ModelTrainer**: Coordinated training with dynamic model type support
+- **ModelEvaluator**: Multi-metric evaluation with centralized metrics calculation
+- **MetricsCalculator**: Unified metrics computation with quantile support
+- **ModelTypeRegistry**: Dynamic model discovery with plugin architecture
 - **BenchmarkPipeline**: Complete workflow orchestration with experiment tracking
+- **ModelRegistry**: Hierarchical model storage and lifecycle management
 
 ## Installation
 
@@ -66,7 +80,12 @@ data_config = DataConfig(
 # Configure training with fixed hyperparameters
 training_config = TrainingConfig(
     validation_split=0.2,
-    model_type="xgboost",
+    random_state=42
+)
+
+# Add model-specific configuration
+training_config.add_model_config(
+    model_type="xgboost_standard",
     hyperparameters={
         "n_estimators": 100,
         "max_depth": 6,
@@ -152,15 +171,58 @@ pipeline_dated.load_and_prepare_data()
 models = pipeline_dated.run_experiment(sku_tuples, ModelingStrategy.COMBINED)
 ```
 
+### Quantile Regression for Uncertainty Quantification
+
+```python
+# Configure quantile model for risk assessment
+training_config = TrainingConfig(
+    validation_split=0.2,
+    random_state=42
+)
+
+# Add quantile model configuration  
+training_config.add_model_config(
+    model_type="xgboost_quantile",
+    hyperparameters={
+        "n_estimators": 100,
+        "max_depth": 6,
+        "learning_rate": 0.3,
+        "quantile_alpha": 0.1,  # 10th percentile prediction
+        "random_state": 42
+    }
+)
+
+pipeline = BenchmarkPipeline(data_config, training_config)
+pipeline.load_and_prepare_data()
+
+# Train quantile models for prediction intervals
+quantile_models = pipeline.run_experiment(
+    sku_tuples=sku_tuples,
+    modeling_strategy=ModelingStrategy.INDIVIDUAL,
+    experiment_name="quantile_uncertainty"
+)
+
+# Examine quantile-specific metrics
+for model in quantile_models:
+    metrics = model.metadata.performance_metrics
+    coverage = metrics.get('coverage_probability', 'N/A')
+    print(f"SKU {model.metadata.sku_tuples[0]}: Coverage Probability = {coverage}")
+```
+
 ## Advanced Usage
 
 ### Custom Hyperparameter Configuration
 
 ```python
-# Advanced XGBoost configuration
+# Advanced XGBoost configuration with multiple model types
 advanced_training_config = TrainingConfig(
     validation_split=0.2,
-    model_type="xgboost",
+    random_state=42
+)
+
+# Configure standard XGBoost with advanced parameters
+advanced_training_config.add_model_config(
+    model_type="xgboost_standard",
     hyperparameters={
         "n_estimators": 200,
         "max_depth": 8,
@@ -173,12 +235,36 @@ advanced_training_config = TrainingConfig(
         "n_jobs": -1  # Use all CPU cores
     }
 )
+
+# Also configure quantile model for uncertainty analysis
+advanced_training_config.add_model_config(
+    model_type="xgboost_quantile", 
+    hyperparameters={
+        "n_estimators": 150,
+        "max_depth": 6,
+        "learning_rate": 0.05,
+        "quantile_alpha": 0.05,  # 5th percentile for conservative estimates
+        "random_state": 42,
+        "n_jobs": -1
+    }
+)
 ```
 
-### Model Registry Operations
+### Model Type Discovery and Registry Operations
 
 ```python
 from src import ModelRegistry
+from src.model_types import model_registry
+
+# Discover available model types
+available_types = model_registry.list_available_types()
+print(f"Available model types: {available_types}")
+
+# Get information about specific model type
+model_info = model_registry.get_model_info("xgboost_quantile")
+print(f"Description: {model_info.description}")
+print(f"Requires quantile: {model_info.requires_quantile}")
+print(f"Default params: {model_info.default_hyperparameters}")
 
 # Work directly with model registry
 registry = ModelRegistry(Path("my_models"))
@@ -188,12 +274,16 @@ all_models = registry.list_models()
 combined_models = registry.list_models(ModelingStrategy.COMBINED)
 
 # Load specific model
-model = registry.load_model("combined_3tuples_12345_xgboost")
+model = registry.load_model("combined_3tuples_12345_xgboost_standard")
 print(f"Model covers {len(model.metadata.sku_tuples)} SKU tuples")
 
 # Access model performance
 metrics = model.metadata.performance_metrics
 print(f"R²: {metrics['r2']:.4f}, MAPE: {metrics['mape']:.2f}%")
+
+# Check for quantile-specific metrics
+if 'coverage_probability' in metrics:
+    print(f"Coverage Probability: {metrics['coverage_probability']:.4f}")
 ```
 
 ### Direct Component Usage
@@ -263,21 +353,29 @@ benchmark_results/
 
 ## Evaluation Metrics
 
-**Core Metrics**:
+The framework uses a centralized **MetricsCalculator** to ensure consistent evaluation across all models, with automatic support for quantile-specific metrics.
+
+**Core Regression Metrics**:
 - **MSE/RMSE**: Mean (squared) error for magnitude assessment
 - **MAE**: Mean absolute error for robust evaluation  
 - **R²**: Coefficient of determination for explained variance
 - **MAPE**: Mean absolute percentage error for relative accuracy
 
-**Error Analysis**:
+**Error Distribution Analysis**:
 - **Max Error**: Worst-case prediction error
 - **Mean Error**: Bias measurement (positive/negative)
 - **Std Error**: Error consistency assessment
 
-**Accuracy Bands**:
+**Accuracy Band Analysis**:
 - **Within 1 Unit**: Percentage of predictions within ±1 unit
 - **Within 2 Units**: Percentage of predictions within ±2 units  
 - **Within 5 Units**: Percentage of predictions within ±5 units
+
+**Quantile-Specific Metrics** (for quantile models):
+- **Coverage Probability**: Actual coverage vs. theoretical quantile level
+- **Quantile Loss**: Specialized loss function for quantile regression evaluation
+
+All metrics are calculated through the centralized system, ensuring consistency across training, evaluation, and comparison workflows.
 
 ## Testing
 
@@ -349,9 +447,16 @@ This framework represents a significant evolution from complex granularity-based
 
 When extending the framework:
 
-1. **New Model Types**: Implement factory pattern in `ModelTrainer._train_model_with_params()`
-2. **New Strategies**: Extend `ModelingStrategy` enum and add pipeline logic
-3. **Additional Features**: Follow existing patterns for data processing and evaluation
-4. **Testing**: Prioritize integration tests that cover complete workflows
+1. **New Model Types**: Create new model class inheriting from `BaseModel` with required attributes (`MODEL_TYPE`, `DESCRIPTION`, `DEFAULT_HYPERPARAMETERS`). The ModelTypeRegistry will automatically discover and register it.
 
-Refer to `context/comprehensive_code_analysis.md` for detailed architectural insights and `tests/README.md` for testing guidelines.
+2. **New Metrics**: Extend `MetricsCalculator.calculate_all_metrics()` to add new evaluation metrics that will be consistently applied across all models.
+
+3. **New Modeling Strategies**: Extend `ModelingStrategy` enum and implement corresponding logic in `BenchmarkPipeline`.
+
+4. **Storage Extensions**: Extend `storage_utils.py` functions to support new storage backends or metadata formats.
+
+5. **Testing**: Prioritize integration tests that cover complete workflows, following the existing 80/20 testing approach.
+
+The plugin architecture makes most extensions seamless - new model types are automatically discovered, metrics are centrally calculated, and storage follows established patterns.
+
+Refer to `context/comprehensive_code_analysis.md` for detailed architectural insights and testing documentation for guidelines.

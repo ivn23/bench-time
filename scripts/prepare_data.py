@@ -42,3 +42,5 @@ df = df.filter(pl.col("not_for_sale") != 1)
 df = add_trend_feature(df, date_col="date")
 
 
+#save data
+df.write_ipc("../data/processed/train_data_features.feather") 

@@ -21,6 +21,20 @@ class XGBoostQuantileModel(BaseModel):
     to perform quantile regression, following the approach from the notebook.
     """
     
+    MODEL_TYPE = "xgboost_quantile"
+    DESCRIPTION = "Quantile XGBoost regression model with custom objective"
+    DEFAULT_HYPERPARAMETERS = {
+        "tree_method": "hist",
+        "max_depth": 6,
+        "learning_rate": 0.3,
+        "subsample": 1.0,
+        "colsample_bytree": 1.0,
+        "reg_alpha": 0.0,
+        "reg_lambda": 1.0,
+        "random_state": 42
+    }
+    REQUIRES_QUANTILE = True
+    
     def __init__(self, quantile_alpha: float = 0.7, **model_params):
         """
         Initialize XGBoost quantile model.
@@ -151,87 +165,3 @@ class XGBoostQuantileModel(BaseModel):
         }
         
         return info
-        
-    def get_evaluation_metrics(self, y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
-        """
-        Calculate quantile-specific and standard evaluation metrics.
-        
-        Args:
-            y_true: True target values
-            y_pred: Predicted quantile values
-            
-        Returns:
-            Dictionary containing both standard and quantile-specific metrics
-        """
-        try:
-            # Standard regression metrics
-            metrics = {
-                "mse": float(mean_squared_error(y_true, y_pred)),
-                "rmse": float(np.sqrt(mean_squared_error(y_true, y_pred))),
-                "mae": float(mean_absolute_error(y_true, y_pred)),
-                "r2": float(r2_score(y_true, y_pred))
-            }
-            
-            # Additional standard metrics
-            residuals = y_true - y_pred
-            metrics.update({
-                "max_error": float(np.max(np.abs(residuals))),
-                "mean_error": float(np.mean(residuals)),
-                "std_error": float(np.std(residuals))
-            })
-            
-            # Calculate MAPE (avoiding division by zero)
-            mask = y_true != 0
-            if np.any(mask):
-                mape = np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100
-                metrics["mape"] = float(mape)
-            else:
-                metrics["mape"] = float('inf')
-                
-            # Standard accuracy bands
-            abs_errors = np.abs(residuals)
-            metrics.update({
-                "within_1_unit": float(np.mean(abs_errors <= 1.0)),
-                "within_2_units": float(np.mean(abs_errors <= 2.0)),
-                "within_5_units": float(np.mean(abs_errors <= 5.0))
-            })
-            
-            # Quantile-specific metrics
-            quantile_metrics = self._calculate_quantile_metrics(y_true, y_pred)
-            metrics.update(quantile_metrics)
-            
-            return metrics
-            
-        except Exception as e:
-            raise ValueError(f"Failed to calculate evaluation metrics: {str(e)}")
-            
-    def _calculate_quantile_metrics(self, y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
-        """
-        Calculate quantile-specific evaluation metrics.
-        
-        Args:
-            y_true: True target values
-            y_pred: Predicted quantile values
-            
-        Returns:
-            Dictionary of quantile-specific metrics
-        """
-        # Quantile score (pinball loss)
-        residual = y_true - y_pred
-        quantile_score_val = np.mean(
-            np.where(residual >= 0, self.quantile_alpha * residual, 
-                    (self.quantile_alpha - 1) * residual)
-        )
-        
-        # Coverage probability (what percentage of actual values are below predictions)
-        coverage = np.mean(y_true <= y_pred)
-        
-        # Coverage error (how far from target quantile)
-        coverage_error = abs(coverage - self.quantile_alpha)
-        
-        return {
-            "quantile_score": float(quantile_score_val),
-            "coverage_probability": float(coverage),
-            "coverage_error": float(coverage_error),
-            "quantile_alpha": float(self.quantile_alpha)
-        }

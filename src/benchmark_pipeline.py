@@ -32,10 +32,10 @@ class BenchmarkPipeline:
         self.output_dir = output_dir
         self.output_dir.mkdir(exist_ok=True)
         
-        # Initialize components
+        # Initialize components with hierarchical storage
         self.data_loader = DataLoader(data_config)
         self.model_trainer = ModelTrainer(training_config)
-        self.model_registry = ModelRegistry(self.output_dir / "models")
+        self.model_registry = ModelRegistry(self.output_dir)  # Uses hierarchical storage
         self.evaluator = ModelEvaluator(self.data_loader, self.model_registry)
         self.viz_generator = VisualizationGenerator()
         
@@ -51,14 +51,16 @@ class BenchmarkPipeline:
     def run_experiment(self, 
                      sku_tuples: SkuList,
                      modeling_strategy: ModelingStrategy = ModelingStrategy.COMBINED,
-                     experiment_name: Optional[str] = None) -> List[BenchmarkModel]:
+                     experiment_name: Optional[str] = None,
+                     model_types: Optional[List[str]] = None) -> List[BenchmarkModel]:
         """
-        Run experiment(s) for specified SKU tuples.
+        Enhanced experiment runner with multi-model type support.
         
         Args:
             sku_tuples: List of (product_id, store_id) tuples defining SKUs
             modeling_strategy: COMBINED (one model for all) or INDIVIDUAL (model per SKU)
             experiment_name: Optional name for this experiment
+            model_types: Optional list of model types to train. If None, uses training config selection.
             
         Returns:
             List of trained BenchmarkModel(s)
@@ -66,27 +68,64 @@ class BenchmarkPipeline:
         if not sku_tuples:
             raise ValueError("At least one SKU tuple must be provided")
         
-        exp_name = experiment_name or f"{modeling_strategy.value}_{len(sku_tuples)}skus"
-        logger.info(f"Running experiment: {exp_name} with {len(sku_tuples)} SKUs")
-        
-        models = []
-        
+        # Validate store/product consistency for COMBINED strategy
         if modeling_strategy == ModelingStrategy.COMBINED:
-            # Train one model on all SKUs together
-            model = self._train_combined_model(sku_tuples, exp_name)
-            models.append(model)
-            
-        elif modeling_strategy == ModelingStrategy.INDIVIDUAL:
-            # Train separate model for each SKU
-            for i, sku_tuple in enumerate(sku_tuples):
-                individual_name = f"{exp_name}_sku_{sku_tuple[0]}x{sku_tuple[1]}"
-                model = self._train_individual_model([sku_tuple], individual_name, i+1, len(sku_tuples))
-                models.append(model)
+            self._validate_sku_consistency(sku_tuples)
         
-        logger.info(f"Experiment {exp_name} completed. Trained {len(models)} model(s)")
-        return models
+        # Get model types to train
+        models_to_train = model_types or self.training_config.model_selection.get_models_to_train()
+        
+        exp_name = experiment_name or f"{modeling_strategy.value}_{len(sku_tuples)}skus_{len(models_to_train)}models"
+        logger.info(f"Running experiment: {exp_name} with {len(sku_tuples)} SKUs and {len(models_to_train)} model types")
+        
+        all_models = []
+        
+        # Train each model type
+        for model_type in models_to_train:
+            logger.info(f"Training {model_type} models for {modeling_strategy.value} strategy")
+            
+            if modeling_strategy == ModelingStrategy.COMBINED:
+                # Train one model per model type for all SKUs
+                models = self._train_combined_models(sku_tuples, model_type, exp_name)
+                all_models.extend(models)
+                
+            elif modeling_strategy == ModelingStrategy.INDIVIDUAL:
+                # Train separate models for each SKU and model type
+                models = self._train_individual_models(sku_tuples, model_type, exp_name)
+                all_models.extend(models)
+        
+        logger.info(f"Experiment {exp_name} completed. Trained {len(all_models)} model(s)")
+        return all_models
+    
+    def _validate_sku_consistency(self, sku_tuples: SkuList):
+        """Validate that SKU tuples have consistent store/product combinations for combined strategy."""
+        stores = set(sku[1] for sku in sku_tuples)
+        products = set(sku[0] for sku in sku_tuples)
+        
+        if len(stores) > 1 and len(products) > 1:
+            logger.warning(f"COMBINED strategy with multiple stores ({len(stores)}) and products ({len(products)}) "
+                         f"may not be optimal. Consider INDIVIDUAL strategy.")
+    
+    def _extract_primary_sku(self, sku_tuples: SkuList) -> SkuTuple:
+        """Extract primary SKU tuple for metadata (first tuple for COMBINED, the tuple for INDIVIDUAL)."""
+        return sku_tuples[0]
 
-    def _train_combined_model(self, sku_tuples: SkuList, exp_name: str) -> BenchmarkModel:
+    def _train_combined_models(self, sku_tuples: SkuList, model_type: str, exp_name: str) -> List[BenchmarkModel]:
+        """Train combined models for a specific model type."""
+        primary_sku = self._extract_primary_sku(sku_tuples)
+        model = self._train_combined_model(sku_tuples, model_type, exp_name, primary_sku)
+        return [model]
+    
+    def _train_individual_models(self, sku_tuples: SkuList, model_type: str, exp_name: str) -> List[BenchmarkModel]:
+        """Train individual models for each SKU and model type."""
+        models = []
+        for i, sku_tuple in enumerate(sku_tuples):
+            individual_name = f"{exp_name}_{model_type}_sku_{sku_tuple[0]}x{sku_tuple[1]}"
+            model = self._train_individual_model([sku_tuple], model_type, individual_name, i+1, len(sku_tuples))
+            models.append(model)
+        return models
+    
+    def _train_combined_model(self, sku_tuples: SkuList, model_type: str, exp_name: str, primary_sku: SkuTuple) -> BenchmarkModel:
         """Train a single model on all specified SKUs."""
         # Get data for all SKUs
         features_df, target_df = self.data_loader.get_data_for_tuples(
@@ -107,7 +146,7 @@ class BenchmarkPipeline:
             )
         else:
             train_bdids, test_bdids, split_date = self.data_loader.create_temporal_split(
-                X, self.training_config.validation_split
+                X, self.data_config.validation_split
             )
         
         # Split data into train and test
@@ -116,11 +155,11 @@ class BenchmarkPipeline:
         X_test = X.filter(pl.col("bdID").is_in(test_bdids))
         y_test = y.filter(pl.col("bdID").is_in(test_bdids))
         
-        # Train model
+        # Train model with specified type
         model = self.model_trainer.train_model(
             X_train, y_train, X_test, y_test,
             feature_cols, self.data_config.target_column,
-            ModelingStrategy.COMBINED, sku_tuples
+            ModelingStrategy.COMBINED, sku_tuples, model_type
         )
         
         # Update data split info
@@ -146,7 +185,7 @@ class BenchmarkPipeline:
         logger.info(f"Combined model trained for {len(sku_tuples)} SKUs. Model ID: {model_id}")
         return model
 
-    def _train_individual_model(self, sku_tuples: SkuList, exp_name: str, 
+    def _train_individual_model(self, sku_tuples: SkuList, model_type: str, exp_name: str, 
                                current: int, total: int) -> BenchmarkModel:
         """Train an individual model for a single SKU."""
         logger.info(f"Training individual model {current}/{total}: {sku_tuples[0]}")
@@ -170,7 +209,7 @@ class BenchmarkPipeline:
             )
         else:
             train_bdids, test_bdids, split_date = self.data_loader.create_temporal_split(
-                X, self.training_config.validation_split
+                X, self.data_config.validation_split
             )
         
         # Split data
@@ -179,11 +218,11 @@ class BenchmarkPipeline:
         X_test = X.filter(pl.col("bdID").is_in(test_bdids))
         y_test = y.filter(pl.col("bdID").is_in(test_bdids))
         
-        # Train model
+        # Train model with specified type
         model = self.model_trainer.train_model(
             X_train, y_train, X_test, y_test,
             feature_cols, self.data_config.target_column,
-            ModelingStrategy.INDIVIDUAL, sku_tuples
+            ModelingStrategy.INDIVIDUAL, sku_tuples, model_type
         )
         
         # Update data split info
@@ -283,11 +322,14 @@ def create_default_configs(data_dir: Path) -> tuple[DataConfig, TrainingConfig]:
         remove_not_for_sale=True
     )
     
+    # Create training config with modern model selection
+    from .data_structures import ModelSelectionConfig
+    
     training_config = TrainingConfig(
-        validation_split=0.2,
         random_state=42,
-        cv_folds=5,
-        model_type="xgboost"
+        model_selection=ModelSelectionConfig(
+            model_types=["xgboost_standard"]  # Default to standard XGBoost
+        )
     )
     
     return data_config, training_config
@@ -322,18 +364,19 @@ def main():
         (80651, 2)   # Product 80651 at Store 2
     ]
     
-    # Run combined strategy (one model for all SKUs)
+    # Run combined strategy (one model for all SKUs) - will train all configured model types
     combined_models = pipeline.run_experiment(
         sku_tuples=example_skus,
         modeling_strategy=ModelingStrategy.COMBINED,
-        experiment_name="example_combined_model"
+        experiment_name="example_combined_models"
     )
     
-    # Run individual strategy (separate model per SKU)
+    # Run individual strategy (separate model per SKU) with specific model types
     individual_models = pipeline.run_experiment(
         sku_tuples=example_skus[:2],  # Use first 2 SKUs for individual models
         modeling_strategy=ModelingStrategy.INDIVIDUAL,
-        experiment_name="example_individual_models"
+        experiment_name="example_individual_models",
+        model_types=["xgboost_standard"]  # Specify specific model types
     )
     
     # Evaluate all models

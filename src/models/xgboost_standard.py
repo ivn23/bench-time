@@ -21,6 +21,19 @@ class XGBoostStandardModel(BaseModel):
     framework while conforming to the BaseModel interface.
     """
     
+    MODEL_TYPE = "xgboost_standard"
+    DESCRIPTION = "Standard XGBoost regression model"
+    DEFAULT_HYPERPARAMETERS = {
+        "n_estimators": 100,
+        "max_depth": 6,
+        "learning_rate": 0.3,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "reg_alpha": 0.1,
+        "reg_lambda": 1.0,
+        "random_state": 42
+    }
+    
     def __init__(self, **model_params):
         """
         Initialize XGBoost standard model.
@@ -100,51 +113,3 @@ class XGBoostStandardModel(BaseModel):
             })
             
         return info
-        
-    def get_evaluation_metrics(self, y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
-        """
-        Calculate standard regression evaluation metrics.
-        
-        Args:
-            y_true: True target values
-            y_pred: Predicted values
-            
-        Returns:
-            Dictionary of standard regression metrics
-        """
-        try:
-            metrics = {
-                "mse": float(mean_squared_error(y_true, y_pred)),
-                "rmse": float(np.sqrt(mean_squared_error(y_true, y_pred))),
-                "mae": float(mean_absolute_error(y_true, y_pred)),
-                "r2": float(r2_score(y_true, y_pred))
-            }
-            
-            # Calculate additional metrics
-            residuals = y_true - y_pred
-            metrics.update({
-                "max_error": float(np.max(np.abs(residuals))),
-                "mean_error": float(np.mean(residuals)),
-                "std_error": float(np.std(residuals))
-            })
-            
-            # Calculate MAPE (avoiding division by zero)
-            mask = y_true != 0
-            if np.any(mask):
-                mape = np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100
-                metrics["mape"] = float(mape)
-            else:
-                metrics["mape"] = float('inf')
-                
-            # Calculate accuracy within error bands
-            abs_errors = np.abs(residuals)
-            metrics.update({
-                "within_1_unit": float(np.mean(abs_errors <= 1.0)),
-                "within_2_units": float(np.mean(abs_errors <= 2.0)), 
-                "within_5_units": float(np.mean(abs_errors <= 5.0))
-            })
-            
-            return metrics
-            
-        except Exception as e:
-            raise ValueError(f"Failed to calculate evaluation metrics: {str(e)}")
