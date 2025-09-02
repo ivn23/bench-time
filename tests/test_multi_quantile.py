@@ -253,6 +253,102 @@ class TestMultiQuantileTraining:
         assert models[0].metadata.quantile_level == 0.7
         assert "q0.7" in models[0].metadata.model_id
 
+    
+    def test_statquant_model_trainer_returns_list(self, prepared_model_data, sample_feature_columns, tmp_path):
+        """Test that ModelTrainer returns list of models for multi-quantile with StatQuant."""
+        X, y, feature_cols = prepared_model_data
+        
+        # Create training config with multi-quantile for StatQuant
+        training_config = TrainingConfig(random_state=42)
+        training_config.add_model_config(
+            model_type="statquant",
+            quantile_alphas=[0.1, 0.9],
+            hyperparameters={"method": "interior-point", "max_iter": 100}
+        )
+        
+        from src.model_training import ModelTrainer
+        
+        # Create simple train/test split
+        n_samples = len(X)
+        train_size = int(0.8 * n_samples)
+        train_bdids = X.select("bdID").to_numpy()[:train_size].flatten()
+        test_bdids = X.select("bdID").to_numpy()[train_size:].flatten()
+        
+        X_train = X.filter(X["bdID"].is_in(train_bdids))
+        y_train = y.filter(y["bdID"].is_in(train_bdids))
+        X_test = X.filter(X["bdID"].is_in(test_bdids))
+        y_test = y.filter(y["bdID"].is_in(test_bdids))
+        
+        # Train models
+        trainer = ModelTrainer(training_config)
+        models = trainer.train_model(
+            X_train, y_train, X_test, y_test,
+            feature_cols, "target",
+            ModelingStrategy.INDIVIDUAL, [(80558, 2)], "statquant"
+        )
+        
+        # Check results
+        assert isinstance(models, list)
+        assert len(models) == 2  # Two quantile levels
+        
+        # Check quantile levels
+        quantile_levels = [model.metadata.quantile_level for model in models]
+        assert 0.1 in quantile_levels
+        assert 0.9 in quantile_levels
+        
+        # Check model IDs contain quantile info
+        for model in models:
+            assert "q" in model.metadata.model_id
+            if model.metadata.quantile_level == 0.1:
+                assert "q0.1" in model.metadata.model_id
+            elif model.metadata.quantile_level == 0.9:
+                assert "q0.9" in model.metadata.model_id
+                
+        # Check that all models are StatQuant models
+        for model in models:
+            assert model.metadata.model_type == "statquant"
+            assert hasattr(model.model, 'quantile_alpha')
+    
+    def test_statquant_single_quantile_backward_compatibility(self, prepared_model_data):
+        """Test backward compatibility with single quantile configuration for StatQuant."""
+        X, y, feature_cols = prepared_model_data
+        
+        # Create training config with single quantile (old way)
+        training_config = TrainingConfig(random_state=42)
+        training_config.add_model_config(
+            model_type="statquant",
+            quantile_alpha=0.7,
+            hyperparameters={"method": "interior-point", "max_iter": 100}
+        )
+        
+        from src.model_training import ModelTrainer
+        
+        # Create simple train/test split
+        n_samples = len(X)
+        train_size = int(0.8 * n_samples)
+        train_bdids = X.select("bdID").to_numpy()[:train_size].flatten()
+        test_bdids = X.select("bdID").to_numpy()[train_size:].flatten()
+        
+        X_train = X.filter(X["bdID"].is_in(train_bdids))
+        y_train = y.filter(y["bdID"].is_in(train_bdids))
+        X_test = X.filter(X["bdID"].is_in(test_bdids))
+        y_test = y.filter(y["bdID"].is_in(test_bdids))
+        
+        # Train models
+        trainer = ModelTrainer(training_config)
+        models = trainer.train_model(
+            X_train, y_train, X_test, y_test,
+            feature_cols, "target",
+            ModelingStrategy.INDIVIDUAL, [(80558, 2)], "statquant"
+        )
+        
+        # Check results
+        assert isinstance(models, list)
+        assert len(models) == 1  # Single quantile level
+        assert models[0].metadata.quantile_level == 0.7
+        assert "q0.7" in models[0].metadata.model_id
+        assert models[0].metadata.model_type == "statquant"
+
 
 class TestMultiQuantileIntegration:
     """Test complete multi-quantile workflow integration."""
@@ -407,3 +503,123 @@ class TestMultiQuantileIntegration:
         
         components = storage_location.to_path_components()
         assert components[3] == "standard"  # Non-quantile models get 'standard' directory
+
+        
+    def test_complete_statquant_multi_quantile_workflow(self, temp_data_dir, tmp_path):
+        """Test complete multi-quantile workflow with StatQuant from config to storage."""
+        
+        # Create data configuration from temporary data
+        data_config = DataConfig(
+            features_path=str(temp_data_dir["features_path"]),
+            target_path=str(temp_data_dir["target_path"]),
+            mapping_path=str(temp_data_dir["mapping_path"]),
+            validation_split=0.2
+        )
+        
+        # Create training config with multi-quantile for StatQuant
+        training_config = TrainingConfig(random_state=42)
+        training_config.add_model_config(
+            model_type="statquant",
+            quantile_alphas=[0.1, 0.5, 0.9],
+            hyperparameters={"method": "interior-point", "max_iter": 100}
+        )
+        
+        # Initialize pipeline
+        results_dir = tmp_path / "results"
+        pipeline = BenchmarkPipeline(
+            data_config, training_config, output_dir=results_dir
+        )
+        pipeline.load_and_prepare_data()
+        
+        # Define test SKUs
+        sku_tuples = [(80558, 2), (80651, 5)]
+        
+        # Run experiment with INDIVIDUAL strategy
+        models = pipeline.run_experiment(
+            sku_tuples=sku_tuples,
+            modeling_strategy=ModelingStrategy.INDIVIDUAL,
+            experiment_name="statquant_multi_quantile_test"
+        )
+        
+        # Validate results
+        assert len(models) == 6  # 2 SKUs × 3 quantile levels
+        
+        # Check quantile levels are represented
+        quantile_levels = set(model.metadata.quantile_level for model in models)
+        assert quantile_levels == {0.1, 0.5, 0.9}
+        
+        # Check SKU coverage
+        sku_coverage = set(model.metadata.sku_tuples[0] for model in models)
+        assert sku_coverage == {(80558, 2), (80651, 5)}
+        
+        # Check model type
+        for model in models:
+            assert model.metadata.model_type == "statquant"
+            assert hasattr(model.model, 'quantile_alpha')
+        
+        # Check model IDs
+        for model in models:
+            assert model.metadata.quantile_level is not None
+            assert f"q{model.metadata.quantile_level}" in model.metadata.model_id
+            assert "individual" in model.metadata.model_id
+        
+        # Check storage hierarchy
+        for model in models:
+            storage_location = model.get_storage_location()
+            assert storage_location.quantile_level == model.metadata.quantile_level
+            
+            # Verify storage path structure
+            components = storage_location.to_path_components()
+            assert len(components) == 5
+            assert components[3].startswith("q")  # Quantile component
+        
+        # Verify models are saved to correct directories
+        models_dir = results_dir / "models"
+        assert models_dir.exists()
+        
+        # Check directory structure includes quantile levels
+        for model in models:
+            location = model.get_storage_location()
+            expected_path = pipeline.model_registry.storage_manager.create_model_path(location)
+            assert expected_path.exists()
+    
+    def test_combined_strategy_statquant_multi_quantile(self, temp_data_dir, tmp_path):
+        """Test multi-quantile StatQuant with COMBINED modeling strategy."""
+        
+        # Create configs from temp data
+        data_config = DataConfig(
+            features_path=str(temp_data_dir["features_path"]),
+            target_path=str(temp_data_dir["target_path"]),
+            mapping_path=str(temp_data_dir["mapping_path"])
+        )
+        
+        training_config = TrainingConfig(random_state=42)
+        training_config.add_model_config(
+            model_type="statquant",
+            quantile_alphas=[0.2, 0.8],
+            hyperparameters={"method": "interior-point", "max_iter": 100}
+        )
+        
+        # Run pipeline
+        pipeline = BenchmarkPipeline(data_config, training_config, tmp_path / "results")
+        pipeline.load_and_prepare_data()
+        
+        sku_tuples = [(80558, 2), (80651, 5)]
+        models = pipeline.run_experiment(
+            sku_tuples=sku_tuples,
+            modeling_strategy=ModelingStrategy.COMBINED,
+            experiment_name="combined_statquant_multi_quantile"
+        )
+        
+        # Validate results  
+        assert len(models) == 2  # 2 quantile levels for combined strategy
+        
+        quantile_levels = {model.metadata.quantile_level for model in models}
+        assert quantile_levels == {0.2, 0.8}
+        
+        # All models should cover both SKUs
+        for model in models:
+            assert len(model.metadata.sku_tuples) == 2
+            assert set(model.metadata.sku_tuples) == {(80558, 2), (80651, 5)}
+            assert "combined" in model.metadata.model_id
+            assert model.metadata.model_type == "statquant"
