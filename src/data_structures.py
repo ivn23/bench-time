@@ -403,7 +403,7 @@ class ModelTypeConfig:
     model_type: str
     hyperparameters: Dict[str, Any] = field(default_factory=dict)
     model_specific_params: Dict[str, Any] = field(default_factory=dict)
-    quantile_alpha: Optional[float] = None  # For backward compatibility
+    quantile_alpha: Optional[float] = None  # For single quantile 
     quantile_alphas: Optional[List[float]] = None  # For multiple quantile levels
     
     def __post_init__(self):
