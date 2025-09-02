@@ -87,6 +87,27 @@ class BaseModel(ABC):
         """Get the underlying model object (for serialization)."""
         return self.model
 
+        
+    def get_evaluation_metrics(self, y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
+        """
+        Calculate evaluation metrics for model predictions.
+        
+        Args:
+            y_true: True target values
+            y_pred: Model predictions
+            
+        Returns:
+            Dictionary containing evaluation metrics
+        """
+        from ..metrics import MetricsCalculator
+        
+        # Check if this is a quantile model
+        quantile_alpha = getattr(self, 'quantile_alpha', None)
+        
+        return MetricsCalculator.calculate_all_metrics(
+            y_true, y_pred, quantile_alpha=quantile_alpha
+        )
+
 
 class ModelTrainingError(Exception):
     """Exception raised when model training fails."""
