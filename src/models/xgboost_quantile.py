@@ -7,7 +7,6 @@ based on the approach from the quantile_xgboost_simple.ipynb notebook.
 
 from typing import Any, Dict, Optional, Tuple
 import numpy as np
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import xgboost as xgb
 
 from .base import BaseModel, ModelTrainingError, ModelPredictionError
