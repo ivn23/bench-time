@@ -10,6 +10,7 @@ import polars as pl
 from pathlib import Path
 import pickle
 import json
+from .storage_utils import ModelStorageLocation
 
 
 class ModelingStrategy(Enum):
@@ -220,7 +221,6 @@ class ModelRegistry:
         
         elif store_id is not None and product_id is not None and model_type:
             # Load by hierarchical parameters
-            from .storage_utils import ModelStorageLocation
             location = ModelStorageLocation(
                 store_id=store_id,
                 product_id=product_id,
@@ -231,8 +231,8 @@ class ModelRegistry:
         
         else:
             raise ValueError("Must provide either model_id or (store_id, product_id, model_type)")
-    
-    def _load_model_from_location(self, location: 'ModelStorageLocation') -> BenchmarkModel:
+
+    def _load_model_from_location(self, location: ModelStorageLocation) -> BenchmarkModel:
         """Load a model from a specific storage location."""
         model_dir = self.storage_manager.create_model_path(location)
         

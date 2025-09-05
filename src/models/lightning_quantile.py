@@ -39,16 +39,16 @@ class QuantileForecastingModel(L.LightningModule):
         if not 0 < quantile_alpha < 1:
             raise ValueError("quantile_alpha must be between 0 and 1")
         
+        # layer so basteln, dass ich ddie size als HP machen kann
         self.model = nn.Sequential(
             nn.Linear(input_size, hidden_size),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_size, hidden_size // 2),
             nn.ReLU(), 
-            nn.Dropout(dropout * 0.5),  # Reduced dropout for second layer
+            nn.Dropout(dropout),
             nn.Linear(hidden_size // 2, 1)
         )
-        
     def forward(self, x):
         return self.model(x)
     
