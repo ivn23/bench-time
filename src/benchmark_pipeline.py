@@ -32,10 +32,10 @@ class BenchmarkPipeline:
         self.output_dir = output_dir
         self.output_dir.mkdir(exist_ok=True)
         
-        # Initialize components with hierarchical storage
+        # Initialize components 
         self.data_loader = DataLoader(data_config)
         self.model_trainer = ModelTrainer(training_config)
-        self.model_registry = ModelRegistry(self.output_dir)  # Uses hierarchical storage
+        self.model_registry = ModelRegistry()  # In-memory only registry
         self.evaluator = ModelEvaluator(self.data_loader, self.model_registry)
         self.viz_generator = VisualizationGenerator()
         
@@ -67,11 +67,7 @@ class BenchmarkPipeline:
         """
         if not sku_tuples:
             raise ValueError("At least one SKU tuple must be provided")
-        
-        # Validate store/product consistency for COMBINED strategy
-        if modeling_strategy == ModelingStrategy.COMBINED:
-            self._validate_sku_consistency(sku_tuples)
-        
+                
         # Get model types to train
         models_to_train = model_types or self.training_config.model_selection.get_models_to_train()
         
@@ -96,15 +92,6 @@ class BenchmarkPipeline:
         
         logger.info(f"Experiment {exp_name} completed. Trained {len(all_models)} model(s)")
         return all_models
-    
-    def _validate_sku_consistency(self, sku_tuples: SkuList):
-        """Validate that SKU tuples have consistent store/product combinations for combined strategy."""
-        stores = set(sku[1] for sku in sku_tuples)
-        products = set(sku[0] for sku in sku_tuples)
-        
-        if len(stores) > 1 and len(products) > 1:
-            logger.warning(f"COMBINED strategy with multiple stores ({len(stores)}) and products ({len(products)}) "
-                         f"may not be optimal. Consider INDIVIDUAL strategy.")
     
     def _extract_primary_sku(self, sku_tuples: SkuList) -> SkuTuple:
         """Extract primary SKU tuple for metadata (first tuple for COMBINED, the tuple for INDIVIDUAL)."""
@@ -168,9 +155,19 @@ class BenchmarkPipeline:
             # Update data split info
             model.data_split.split_date = str(split_date)
             
-            # Register and save model
+            # Register model in memory
             model_id = self.model_registry.register_model(model)
-            self.model_registry.save_model(model_id)
+            
+            # Use release manager for persistence
+            from .release_management import ReleaseManagerFactory
+            release_manager = ReleaseManagerFactory.get_manager(model_type)
+            if release_manager:
+                # Create version from experiment name and model info
+                version = f"{exp_name}_{model_id}_{model_type}"
+                release_manager.export_release(version, model, self.output_dir)
+                logger.info(f"Model released using {release_manager.__class__.__name__}: version {version}")
+            else:
+                logger.warning(f"No release manager found for model type: {model_type}")
             
             # Log experiment
             experiment_record = {
@@ -238,9 +235,19 @@ class BenchmarkPipeline:
             # Update data split info
             model.data_split.split_date = str(split_date)
             
-            # Register and save model
+            # Register model in memory
             model_id = self.model_registry.register_model(model)
-            self.model_registry.save_model(model_id)
+            
+            # Use release manager for persistence
+            from .release_management import ReleaseManagerFactory
+            release_manager = ReleaseManagerFactory.get_manager(model_type)
+            if release_manager:
+                # Create version from experiment name and model info
+                version = f"{exp_name}_{model_id}_{model_type}"
+                release_manager.export_release(version, model, self.output_dir)
+                logger.info(f"Model released using {release_manager.__class__.__name__}: version {version}")
+            else:
+                logger.warning(f"No release manager found for model type: {model_type}")
             
             # Log experiment
             experiment_record = {
@@ -321,86 +328,3 @@ class BenchmarkPipeline:
             return obj.tolist() if isinstance(obj, np.ndarray) else obj.item()
         else:
             return str(obj)
-    
-
-def create_default_configs(data_dir: Path) -> tuple[DataConfig, TrainingConfig]:
-    """Create default configurations for the pipeline."""
-    
-    data_config = DataConfig(
-        features_path=str(data_dir / "train_data_features.feather"),
-        target_path=str(data_dir / "train_data_target.feather"),
-        mapping_path=str(data_dir / "feature_mapping_train.pkl"),
-        date_column="date",
-        target_column="target",
-        bdid_column="bdID",
-        remove_not_for_sale=True
-    )
-    
-    # Create training config with modern model selection
-    from .data_structures import ModelSelectionConfig
-    
-    training_config = TrainingConfig(
-        random_state=42,
-        model_selection=ModelSelectionConfig(
-            model_types=["xgboost_standard"]  # Default to standard XGBoost
-        )
-    )
-    
-    return data_config, training_config
-
-
-def main():
-    """Example usage of the benchmark pipeline."""
-    import polars as pl
-    
-    # Setup logging
-    logging.basicConfig(level=logging.INFO)
-    
-    # Create configurations
-    data_dir = Path("../data")
-    data_config, training_config = create_default_configs(data_dir)
-    
-    # Initialize pipeline
-    pipeline = BenchmarkPipeline(
-        data_config=data_config,
-        training_config=training_config,
-        output_dir=Path("benchmark_results")
-    )
-    
-    # Load data
-    pipeline.load_and_prepare_data()
-    
-    # Example: Train models for specific SKUs
-    # Each tuple is (product_id, store_id)
-    example_skus = [
-        (80558, 2),  # Product 80558 at Store 2
-        (80558, 5),  # Product 80558 at Store 5
-        (80651, 2)   # Product 80651 at Store 2
-    ]
-    
-    # Run combined strategy (one model for all SKUs) - will train all configured model types
-    combined_models = pipeline.run_experiment(
-        sku_tuples=example_skus,
-        modeling_strategy=ModelingStrategy.COMBINED,
-        experiment_name="example_combined_models"
-    )
-    
-    # Run individual strategy (separate model per SKU) with specific model types
-    individual_models = pipeline.run_experiment(
-        sku_tuples=example_skus[:2],  # Use first 2 SKUs for individual models
-        modeling_strategy=ModelingStrategy.INDIVIDUAL,
-        experiment_name="example_individual_models",
-        model_types=["xgboost_standard"]  # Specify specific model types
-    )
-    
-    # Evaluate all models
-    evaluation_results = pipeline.evaluate_all_models()
-    
-    # Save logs
-    pipeline.save_experiment_log()
-    
-    logger.info("Benchmark pipeline completed successfully!")
-
-
-if __name__ == "__main__":
-    main()

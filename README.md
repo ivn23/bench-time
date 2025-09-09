@@ -1,6 +1,6 @@
 # M5 Time Series Benchmarking Framework
 
-A production-ready, tuple-based framework for time series forecasting on M5 competition data. Features dual modeling strategies (COMBINED and INDIVIDUAL), centralized metrics calculation, dynamic model discovery, quantile regression support, and comprehensive model lifecycle management with complete experiment tracking.
+A production-ready, tuple-based framework for time series forecasting on M5 competition data. Features dual modeling strategies (COMBINED and INDIVIDUAL), centralized metrics calculation, dynamic model discovery, multi-quantile regression support, PyTorch Lightning neural networks, statistical baselines, and comprehensive model lifecycle management with complete experiment tracking.
 
 ## Key Features
 
@@ -8,9 +8,9 @@ A production-ready, tuple-based framework for time series forecasting on M5 comp
 
 **Centralized Metrics System**: Unified MetricsCalculator provides consistent evaluation across all models with comprehensive metrics including MSE, RMSE, MAE, R², MAPE, accuracy bands, and quantile-specific metrics.
 
-**Dynamic Model Discovery**: Plugin architecture with ModelTypeRegistry automatically discovers and registers available model types, supporting both standard and quantile XGBoost implementations.
+**Dynamic Model Discovery**: Plugin architecture with ModelTypeRegistry automatically discovers and registers available model types, supporting XGBoost (standard/quantile), PyTorch Lightning neural networks, and statistical baselines.
 
-**Quantile Regression Support**: Native support for quantile models with coverage probability analysis for uncertainty quantification and risk assessment.
+**Multi-Quantile Regression Support**: Native support for quantile models with multiple quantile levels, coverage probability analysis, and specialized neural network implementations for uncertainty quantification and risk assessment.
 
 **Fixed Hyperparameter Training**: Direct hyperparameter specification eliminates optimization complexity, enabling rapid experimentation cycles with predetermined parameters.
 
@@ -33,9 +33,11 @@ src/
 ├── model_types.py          # Dynamic model discovery and registration
 ├── storage_utils.py        # Hierarchical model storage utilities
 └── models/
-    ├── base.py             # Abstract base model interface
-    ├── xgboost_standard.py # Standard XGBoost implementation
-    └── xgboost_quantile.py # Quantile XGBoost implementation
+    ├── base.py               # Abstract base model interface
+    ├── xgboost_standard.py   # Standard XGBoost implementation
+    ├── xgboost_quantile.py   # Quantile XGBoost implementation
+    ├── lightning_quantile.py # PyTorch Lightning quantile models
+    └── statquant_model.py    # Statistical quantile baseline
 ```
 
 **Core Components:**
@@ -409,6 +411,8 @@ polars>=0.19.0          # Efficient DataFrame operations
 numpy>=1.21.0           # Numerical computations  
 scikit-learn>=1.0.0     # ML metrics and utilities
 xgboost>=1.7.0          # Gradient boosting models
+torch>=1.9.0            # PyTorch for neural network models
+pytorch-lightning>=1.5.0 # Lightning framework for training
 ```
 
 **Optional Dependencies**:
