@@ -65,6 +65,7 @@ implement/
 src/load_data.ipynb
 
 examples/
+ai_docs/
 
 src/test_code.ipynb
 src/test_pipeline.ipynb
@@ -75,3 +76,7 @@ notebooks/
 
 .pytest_cache/
 specs/
+
+.serena/*
+artifacts/
+Transformers_code/

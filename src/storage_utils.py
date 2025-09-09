@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Tuple, Optional, Dict, List
 from dataclasses import dataclass
 
-from .data_structures import SkuTuple
+# Type alias to avoid circular import
+SkuTuple = Tuple[int, int]  # (product_id, store_id)
 
 
 @dataclass

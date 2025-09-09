@@ -18,7 +18,7 @@ prompt: $ARGUMENTS (IMPORTANT: second argument)
 - Research the codebase starting with `README.md`
 - IMPORTANT: When you finish your plan, return only the path to the plan file created.
 - IMPORTANT: Replace every <placeholder> in the `Plan Format` with the requested value
-- Think hard and throughly through the task requirements and appropriate level of planning needed
+- Think hard and thoroughly through the task requirements at an appropriate level of planning needed
 - Follow existing patterns and conventions in the codebase
 
 ## Workflow

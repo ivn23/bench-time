@@ -248,23 +248,33 @@ class TestPipelineIntegration:
             experiment_name="test_persistence"
         )
         
-        # Get model and verify it was saved using hierarchical storage
+        # Get model and verify it was saved using new release management system
         model = models[0]
         model_id = model.get_identifier()
-        storage_location = model.get_storage_location()
-        model_dir = pipeline.model_registry.storage_manager.create_model_path(storage_location)
+        model_type = model.metadata.model_type
         
-        assert model_dir.exists(), f"Model directory not found at {model_dir}"
+        # Check that release directory was created
+        release_dirs = list(temp_output_dir.glob("release_*"))
+        assert len(release_dirs) > 0, f"No release directories found in {temp_output_dir}"
         
-        # Check expected files exist
-        expected_files = ["model.pkl", "metadata.json", "data_splits.json"]
+        # Check that the release contains expected files
+        release_dir = release_dirs[0]  # Use first release directory
+        expected_files = ["bundle.json", "metrics.json", "data_splits.json"]
         for filename in expected_files:
-            assert (model_dir / filename).exists(), f"Expected file {filename} not found in {model_dir}"
+            assert (release_dir / filename).exists(), f"Expected file {filename} not found in {release_dir}"
+        
+        # Check that models directory exists with model files
+        models_dir = release_dir / "models"
+        assert models_dir.exists(), f"Models directory not found in {release_dir}"
+        
+        # Check for model pickle files (naming pattern: model_<storeID>_<productID>.pkl)
+        model_files = list(models_dir.glob("model_*.pkl"))
+        assert len(model_files) > 0, f"No model files found in {models_dir}"
         
         # Verify data_splits.json content
         import json
         import numpy as np
-        with open(model_dir / "data_splits.json") as f:
+        with open(release_dir / "data_splits.json") as f:
             splits_data = json.load(f)
         
         # Assert arrays match the model's data split
@@ -276,8 +286,8 @@ class TestPipelineIntegration:
         if original_model.data_split.split_date is not None:
             assert splits_data["split_date"] == original_model.data_split.split_date
         
-        # Test loading the model
-        loaded_model = pipeline.model_registry.load_model(model_id)
+        # Test retrieving the model from in-memory registry
+        loaded_model = pipeline.model_registry.get_model(model_id)
         assert loaded_model is not None
         assert loaded_model.metadata.model_id == models[0].metadata.model_id
         assert loaded_model.model is not None
@@ -394,14 +404,27 @@ class TestPipelineIntegration:
         assert "mae" in metrics
         assert "r2" in metrics
         
-        # Test model persistence with hierarchical storage
+        # Test model persistence with new release management system
         model_id = model.get_identifier()
-        storage_location = model.get_storage_location()
-        model_dir = pipeline.model_registry.storage_manager.create_model_path(storage_location)
-        assert model_dir.exists(), f"Model directory not found at {model_dir}"
         
-        # Test loading quantile model
-        loaded_model = pipeline.model_registry.load_model(model_id)
+        # Check that release directory was created
+        release_dirs = list(temp_output_dir.glob("release_*"))
+        assert len(release_dirs) > 0, f"No release directories found in {temp_output_dir}"
+        
+        # Check that the release contains quantile-specific bundle metadata
+        release_dir = release_dirs[0]  # Use first release directory
+        assert (release_dir / "bundle.json").exists(), f"Bundle file not found in {release_dir}"
+        
+        import json
+        with open(release_dir / "bundle.json") as f:
+            bundle_data = json.load(f)
+        
+        # Verify quantile-specific information in bundle
+        assert bundle_data["model_family"] == "xgboost_quantile"
+        assert bundle_data["quantile_level"] == 0.75
+        
+        # Test in-memory model retrieval (since we no longer have disk loading)
+        loaded_model = pipeline.model_registry.get_model(model_id)
         assert loaded_model is not None
         assert loaded_model.metadata.model_type == "xgboost_quantile"
 

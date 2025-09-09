@@ -6,10 +6,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional, Union, Tuple
 from enum import Enum
 import numpy as np
-import polars as pl
 from pathlib import Path
-import pickle
-import json
 from .storage_utils import ModelStorageLocation
 
 
@@ -110,16 +107,19 @@ class BenchmarkModel:
 
 
 class ModelRegistry:
-    """Enhanced registry for storing and managing benchmark models with hierarchical storage."""
+    """Simplified registry for in-memory storage and management of benchmark models.
+    
+    Note: Model persistence is now handled by the release management system,
+    not by this registry. This registry only manages in-memory model storage
+    and retrieval.
+    """
     
     def __init__(self, storage_path: Optional[Path] = None):
         self.models: Dict[str, BenchmarkModel] = {}
+        # Note: storage_path kept for compatibility but not used for persistence
+        # Persistence is now handled by release management system
         self.storage_path = storage_path or Path("benchmark_results")
         self.storage_path.mkdir(exist_ok=True)
-        
-        # Initialize hierarchical storage manager
-        from .storage_utils import HierarchicalStorageManager
-        self.storage_manager = HierarchicalStorageManager(self.storage_path)
     
     def register_model(self, model: BenchmarkModel) -> str:
         """Register a new model in the registry."""
@@ -139,187 +139,6 @@ class ModelRegistry:
             mid for mid, model in self.models.items() 
             if model.metadata.modeling_strategy == modeling_strategy
         ]
-    
-    def save_model(self, model_id: str, save_data_splits: bool = True):
-        """Save a model to hierarchical disk storage."""
-        if model_id not in self.models:
-            raise ValueError(f"Model {model_id} not found in registry")
-        
-        model = self.models[model_id]
-        storage_location = model.get_storage_location()
-        model_dir = self.storage_manager.ensure_model_directory(storage_location)
-        
-        # Update storage location in metadata
-        model.metadata.storage_location = str(model_dir)
-        
-        # Save model object
-        with open(model_dir / "model.pkl", "wb") as f:
-            pickle.dump(model.model, f)
-        
-        # Helper function to make objects JSON serializable
-        def make_json_serializable(obj):
-            """Helper to make objects JSON serializable."""
-            if hasattr(obj, '__dict__'):
-                return obj.__dict__
-            elif isinstance(obj, (np.ndarray, np.integer, np.floating)):
-                return obj.tolist() if isinstance(obj, np.ndarray) else obj.item()
-            else:
-                return str(obj)
-        
-        # Save enhanced metadata as JSON with serialization handling
-        metadata_dict = {
-            "model_id": model.metadata.model_id,
-            "modeling_strategy": model.metadata.modeling_strategy.value,
-            "sku_tuples": model.metadata.sku_tuples,
-            "model_type": model.metadata.model_type,
-            "store_id": model.metadata.store_id,
-            "product_id": model.metadata.product_id,
-            "model_instance": model.metadata.model_instance,
-            "storage_location": model.metadata.storage_location,
-            "quantile_level": model.metadata.quantile_level,  # Add quantile level to saved metadata
-            "hyperparameters": model.metadata.hyperparameters,
-            "training_config": make_json_serializable(model.metadata.training_config),
-            "performance_metrics": model.metadata.performance_metrics,
-            "feature_columns": model.metadata.feature_columns,
-            "target_column": model.metadata.target_column,
-            "training_date_range": model.metadata.training_date_range
-        }
-        
-        with open(model_dir / "metadata.json", "w") as f:
-            json.dump(metadata_dict, f, indent=2)
-        
-        # Save data splits
-        if save_data_splits:
-            splits_dict = {
-                "train_bdIDs": model.data_split.train_bdIDs.tolist(),
-                "validation_bdIDs": model.data_split.validation_bdIDs.tolist(),
-                "test_bdIDs": model.data_split.test_bdIDs.tolist() if model.data_split.test_bdIDs is not None else None,
-                "split_date": model.data_split.split_date
-            }
-            
-            with open(model_dir / "data_splits.json", "w") as f:
-                json.dump(splits_dict, f)
-    
-    def load_model(self, model_id: str = None, store_id: int = None, 
-                   product_id: int = None, model_type: str = None, 
-                   model_instance: str = "default") -> BenchmarkModel:
-        """Load a model from hierarchical disk storage."""
-        
-        if model_id:
-            # Try to load by model_id first (for backward compatibility)
-            if model_id in self.models:
-                return self.models[model_id]
-            
-            # If not in memory, try to find by hierarchical search
-            locations = self.storage_manager.find_models()
-            for location in locations:
-                model_path = self.storage_manager.create_model_path(location)
-                if location.model_instance == model_id or str(model_path).endswith(model_id):
-                    return self._load_model_from_location(location)
-            
-            raise ValueError(f"Model {model_id} not found")
-        
-        elif store_id is not None and product_id is not None and model_type:
-            # Load by hierarchical parameters
-            location = ModelStorageLocation(
-                store_id=store_id,
-                product_id=product_id,
-                model_type=model_type,
-                model_instance=model_instance
-            )
-            return self._load_model_from_location(location)
-        
-        else:
-            raise ValueError("Must provide either model_id or (store_id, product_id, model_type)")
-
-    def _load_model_from_location(self, location: ModelStorageLocation) -> BenchmarkModel:
-        """Load a model from a specific storage location."""
-        model_dir = self.storage_manager.create_model_path(location)
-        
-        if not model_dir.exists():
-            raise ValueError(f"Model directory {model_dir} not found")
-        
-        # Load model object
-        with open(model_dir / "model.pkl", "rb") as f:
-            model_obj = pickle.load(f)
-        
-        # Load metadata
-        with open(model_dir / "metadata.json", "r") as f:
-            metadata_dict = json.load(f)
-        
-        metadata = ModelMetadata(
-            model_id=metadata_dict["model_id"],
-            modeling_strategy=ModelingStrategy(metadata_dict["modeling_strategy"]),
-            sku_tuples=[(tuple(t) if isinstance(t, list) else t) for t in metadata_dict["sku_tuples"]],
-            model_type=metadata_dict["model_type"],
-            store_id=metadata_dict.get("store_id", location.store_id),
-            product_id=metadata_dict.get("product_id", location.product_id),
-            model_instance=metadata_dict.get("model_instance", location.model_instance),
-            storage_location=metadata_dict.get("storage_location"),
-            hyperparameters=metadata_dict["hyperparameters"],
-            training_config=metadata_dict["training_config"],
-            performance_metrics=metadata_dict["performance_metrics"],
-            feature_columns=metadata_dict["feature_columns"],
-            target_column=metadata_dict["target_column"],
-            training_date_range=tuple(metadata_dict["training_date_range"])
-        )
-        
-        # Load data splits
-        with open(model_dir / "data_splits.json", "r") as f:
-            splits_dict = json.load(f)
-        
-        data_split = DataSplit(
-            train_bdIDs=np.array(splits_dict["train_bdIDs"]),
-            validation_bdIDs=np.array(splits_dict["validation_bdIDs"]),
-            test_bdIDs=np.array(splits_dict["test_bdIDs"]) if splits_dict["test_bdIDs"] is not None else None,
-            split_date=splits_dict["split_date"]
-        )
-        
-        benchmark_model = BenchmarkModel(
-            metadata=metadata,
-            model=model_obj,
-            data_split=data_split
-        )
-        
-        # Register in memory
-        model_id = benchmark_model.get_identifier()
-        self.models[model_id] = benchmark_model
-        
-        return benchmark_model
-    
-    def list_models_by_store(self, store_id: int) -> List[str]:
-        """List all model IDs for a specific store."""
-        locations = self.storage_manager.find_models(store_id=store_id)
-        return [f"{loc.store_id}_{loc.product_id}_{loc.model_type}_{loc.model_instance}" for loc in locations]
-    
-    def list_models_by_product(self, product_id: int) -> List[str]:
-        """List all model IDs for a specific product across all stores."""
-        locations = self.storage_manager.find_models(product_id=product_id)
-        return [f"{loc.store_id}_{loc.product_id}_{loc.model_type}_{loc.model_instance}" for loc in locations]
-    
-    def list_model_types(self, store_id: int = None, product_id: int = None) -> List[str]:
-        """List available model types, optionally filtered by store/product."""
-        if store_id is not None and product_id is not None:
-            return self.storage_manager.list_model_types_for_sku(store_id, product_id)
-        
-        # Get all unique model types
-        locations = self.storage_manager.find_models(store_id=store_id, product_id=product_id)
-        return sorted(list(set(loc.model_type for loc in locations)))
-    
-    def find_models(self, store_id: Optional[int] = None, product_id: Optional[int] = None,
-                   model_type: Optional[str] = None) -> List[BenchmarkModel]:
-        """Find models matching the specified criteria."""
-        locations = self.storage_manager.find_models(store_id, product_id, model_type)
-        models = []
-        
-        for location in locations:
-            try:
-                model = self._load_model_from_location(location)
-                models.append(model)
-            except Exception as e:
-                print(f"Warning: Could not load model at {location}: {e}")
-        
-        return models
 
 
 @dataclass
