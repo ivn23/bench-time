@@ -5,11 +5,13 @@ This module provides an extensible model architecture using the factory pattern.
 Different model types can be easily added by implementing the BaseModel interface.
 """
 
+from src.models.statquant_model import StatQuantModel
 from .base import BaseModel
 from .xgboost_standard import XGBoostStandardModel
 from .xgboost_quantile import XGBoostQuantileModel
 from .lightning_standard import LightningStandardModel
 from .lightning_quantile import LightningQuantileModel
+from .statquant_model import StatQuantModel
 
 # Model registry mapping
 MODEL_REGISTRY = {
@@ -17,6 +19,7 @@ MODEL_REGISTRY = {
     "xgboost_quantile": XGBoostQuantileModel,
     "lightning_standard": LightningStandardModel,
     "lightning_quantile": LightningQuantileModel,
+    "statquant_model": StatQuantModel
 }
 
 

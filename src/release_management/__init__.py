@@ -13,6 +13,7 @@ Key Components:
 
 from .base import BaseReleaseManager
 from .factory import ReleaseManagerFactory
+from .comprehensive_manager import ComprehensiveReleaseManager
 
 # Import managers to trigger registration
 from . import managers
@@ -20,4 +21,5 @@ from . import managers
 __all__ = [
     "BaseReleaseManager",
     "ReleaseManagerFactory",
+    "ComprehensiveReleaseManager",
 ]

@@ -7,15 +7,17 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 import json
+from datetime import datetime
 import polars as pl
 
 from .data_structures import (
     DataConfig, TrainingConfig, ModelingStrategy, SkuList, SkuTuple,
-    ModelRegistry, BenchmarkModel
+    ModelRegistry, BenchmarkModel, ExperimentResults, ModelingDataset
 )
 from .data_loading import DataLoader
 from .model_training import ModelTrainer
-from .evaluation import ModelEvaluator, VisualizationGenerator
+from .evaluation import ModelEvaluator
+from .release_management import ComprehensiveReleaseManager
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +39,16 @@ class BenchmarkPipeline:
         self.model_trainer = ModelTrainer(training_config)
         self.model_registry = ModelRegistry()  # In-memory only registry
         self.evaluator = ModelEvaluator(self.data_loader, self.model_registry)
-        self.viz_generator = VisualizationGenerator()
         
         # Track experiment state
-        self.experiment_log = []
+        self.experiment_log = {
+            "experiments": [],
+            "pipeline_config": {
+                "data_config": str(data_config),
+                "training_config": str(training_config),
+                "output_dir": str(output_dir)
+            }
+        }
         
     def load_and_prepare_data(self):
         """Load and prepare the base dataset."""
@@ -52,15 +60,14 @@ class BenchmarkPipeline:
                      sku_tuples: SkuList,
                      modeling_strategy: ModelingStrategy = ModelingStrategy.COMBINED,
                      experiment_name: Optional[str] = None,
-                     model_types: Optional[List[str]] = None) -> List[BenchmarkModel]:
+                     ) -> List[BenchmarkModel]:
         """
-        Enhanced experiment runner with multi-model type support.
+        Simplified experiment runner using the new clean architecture.
         
         Args:
             sku_tuples: List of (product_id, store_id) tuples defining SKUs
             modeling_strategy: COMBINED (one model for all) or INDIVIDUAL (model per SKU)
             experiment_name: Optional name for this experiment
-            model_types: Optional list of model types to train. If None, uses training config selection.
             
         Returns:
             List of trained BenchmarkModel(s)
@@ -68,206 +75,171 @@ class BenchmarkPipeline:
         if not sku_tuples:
             raise ValueError("At least one SKU tuple must be provided")
                 
-        # Get model types to train
-        models_to_train = model_types or self.training_config.model_selection.get_models_to_train()
+        # Use the single configured model type
+        model_type = self.training_config.model_type
         
-        exp_name = experiment_name or f"{modeling_strategy.value}_{len(sku_tuples)}skus_{len(models_to_train)}models"
-        logger.info(f"Running experiment: {exp_name} with {len(sku_tuples)} SKUs and {len(models_to_train)} model types")
+        exp_name = experiment_name or f"experiment_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        logger.info(f"Running experiment: {exp_name} with {len(sku_tuples)} SKUs using {model_type}")
         
-        all_models = []
+        # New clean architecture - single unified method
+        models = self._train_models_for_strategy(sku_tuples, modeling_strategy, model_type, exp_name)
         
-        # Train each model type
-        for model_type in models_to_train:
-            logger.info(f"Training {model_type} models for {modeling_strategy.value} strategy")
-            
-            if modeling_strategy == ModelingStrategy.COMBINED:
-                # Train one model per model type for all SKUs
-                models = self._train_combined_models(sku_tuples, model_type, exp_name)
-                all_models.extend(models)
-                
-            elif modeling_strategy == ModelingStrategy.INDIVIDUAL:
-                # Train separate models for each SKU and model type
-                models = self._train_individual_models(sku_tuples, model_type, exp_name)
-                all_models.extend(models)
-        
-        logger.info(f"Experiment {exp_name} completed. Trained {len(all_models)} model(s)")
-        return all_models
-    
-    def _extract_primary_sku(self, sku_tuples: SkuList) -> SkuTuple:
-        """Extract primary SKU tuple for metadata (first tuple for COMBINED, the tuple for INDIVIDUAL)."""
-        return sku_tuples[0]
-
-    def _train_combined_models(self, sku_tuples: SkuList, model_type: str, exp_name: str) -> List[BenchmarkModel]:
-        """Train combined models for a specific model type (now supports multi-quantile)."""
-        primary_sku = self._extract_primary_sku(sku_tuples)
-        models = self._train_combined_model(sku_tuples, model_type, exp_name, primary_sku)
-        return models  # Now returns list of models for multi-quantile support
-    
-    def _train_individual_models(self, sku_tuples: SkuList, model_type: str, exp_name: str) -> List[BenchmarkModel]:
-        """Train individual models for each SKU and model type (now supports multi-quantile)."""
-        models = []
-        for i, sku_tuple in enumerate(sku_tuples):
-            individual_name = f"{exp_name}_{model_type}_sku_{sku_tuple[0]}x{sku_tuple[1]}"
-            sku_models = self._train_individual_model([sku_tuple], model_type, individual_name, i+1, len(sku_tuples))
-            models.extend(sku_models)  # Now extends list for multi-quantile support
+        logger.info(f"Experiment {exp_name} completed. Trained {len(models)} model(s)")
         return models
     
-    def _train_combined_model(self, sku_tuples: SkuList, model_type: str, exp_name: str, primary_sku: SkuTuple) -> List[BenchmarkModel]:
-        """Train model(s) on all specified SKUs (now supports multi-quantile)."""
-        # Get data for all SKUs
-        features_df, target_df = self.data_loader.get_data_for_tuples(
-            sku_tuples, ModelingStrategy.COMBINED, collect=True
-        )
+    def run_complete_experiment(
+        self,
+        sku_tuples: SkuList,
+        modeling_strategy: ModelingStrategy = ModelingStrategy.COMBINED,
+        experiment_name: Optional[str] = None,
+        evaluate: bool = True
+    ) -> Path:
+        """
+        Run complete experiment with training, evaluation, and release packaging.
         
-        # Prepare features for modeling
-        X, y, feature_cols = self.data_loader.prepare_features_for_modeling(
-            features_df, target_df, self.data_config.target_column
-        )
-        
-        logger.info(f"Combined model dataset: {len(X)} samples, {len(feature_cols)} features")
-        
-        # Create temporal split - use date-based split if specified, otherwise use percentage
-        if self.data_config.split_date:
-            train_bdids, test_bdids, split_date = self.data_loader.create_temporal_split_by_date(
-                X, self.data_config.split_date
-            )
-        else:
-            train_bdids, test_bdids, split_date = self.data_loader.create_temporal_split(
-                X, self.data_config.validation_split
-            )
-        
-        # Split data into train and test
-        X_train = X.filter(pl.col("bdID").is_in(train_bdids))
-        y_train = y.filter(pl.col("bdID").is_in(train_bdids))
-        X_test = X.filter(pl.col("bdID").is_in(test_bdids))
-        y_test = y.filter(pl.col("bdID").is_in(test_bdids))
-        
-        # Train model(s) with specified type - now returns list of models for multi-quantile
-        models = self.model_trainer.train_model(
-            X_train, y_train, X_test, y_test,
-            feature_cols, self.data_config.target_column,
-            ModelingStrategy.COMBINED, sku_tuples, model_type
-        )
-        
-        # Process each trained model
-        trained_models = []
-        for model in models:
-            # Update data split info
-            model.data_split.split_date = str(split_date)
+        Args:
+            sku_tuples: List of (product_id, store_id) tuples defining SKUs
+            modeling_strategy: COMBINED (one model for all) or INDIVIDUAL (model per SKU)
+            experiment_name: Optional name for this experiment
+            evaluate: Whether to run evaluation (creates metrics.json if True)
             
+        Returns:
+            Path to created release directory
+        """
+        if experiment_name is None:
+            experiment_name = f"experiment_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        logger.info(f"Running complete experiment: {experiment_name}")
+        
+        # Train models (returns models in memory)
+        models = self.run_experiment(sku_tuples, modeling_strategy, experiment_name)
+        
+        # Optionally evaluate models (returns results in memory)
+        evaluation_results = None
+        if evaluate:
+            logger.info("Running evaluation...")
+            evaluation_results = self.evaluate_models(models)
+        
+        # Create ExperimentResults object
+        experiment_results = ExperimentResults(
+            models=models,
+            evaluation_results=evaluation_results,
+            experiment_log=self.experiment_log,
+            configurations={
+                'data_config': self.data_config,
+                'training_config': self.training_config
+            },
+            experiment_name=experiment_name,
+            timestamp=datetime.now()
+        )
+        
+        # Delegate to ComprehensiveReleaseManager for consolidation
+        release_manager = ComprehensiveReleaseManager()
+        release_dir = release_manager.create_complete_release(experiment_results, self.output_dir)
+        
+        logger.info(f"Complete experiment finished. Release available at: {release_dir}")
+        return release_dir
+    
+    def evaluate_models(self, models: List[BenchmarkModel]) -> Dict[str, Any]:
+        """
+        Evaluate specific models and return results in memory.
+        
+        Args:
+            models: List of models to evaluate
+            
+        Returns:
+            Evaluation results dictionary
+        """
+        logger.info(f"Evaluating {len(models)} models")
+        
+        # Register models temporarily for evaluation
+        temp_registry = ModelRegistry()
+        model_ids = []
+        for model in models:
+            model_id = temp_registry.register_model(model)
+            model_ids.append(model_id)
+        
+        # Create temporary evaluator with the models
+        temp_evaluator = ModelEvaluator(self.data_loader, temp_registry)
+        
+        evaluation_results = {}
+        
+        # Evaluate models by strategy
+        for strategy in ModelingStrategy:
+            strategy_models = [mid for mid in model_ids 
+                             if temp_registry.get_model(mid).metadata.modeling_strategy == strategy]
+            if strategy_models:
+                strategy_results = temp_evaluator.evaluate_by_modeling_strategy(strategy)
+                if "error" not in strategy_results:
+                    evaluation_results[strategy.value] = strategy_results
+        
+        # Overall comparison if we have models
+        if model_ids:
+            evaluation_results["overall"] = temp_evaluator.compare_models(model_ids)
+        
+        logger.info(f"Evaluation completed for {len(models)} models")
+        return evaluation_results
+    
+    def _train_models_for_strategy(
+        self,
+        sku_tuples: SkuList,
+        modeling_strategy: ModelingStrategy,
+        model_type: str,
+        exp_name: str
+    ) -> List[BenchmarkModel]:
+        """
+        Unified training method for both COMBINED and INDIVIDUAL strategies.
+        Uses DataLoader for all data operations - no data manipulation here.
+        """
+        if modeling_strategy == ModelingStrategy.COMBINED:
+            # Prepare single dataset for all SKUs
+            dataset = self.data_loader.prepare_modeling_dataset(sku_tuples, modeling_strategy)
+            models = self.model_trainer.train_model(dataset, model_type)
+            return self._process_trained_models(models, dataset, exp_name)
+            
+        elif modeling_strategy == ModelingStrategy.INDIVIDUAL:
+            # Train separate model for each SKU
+            all_models = []
+            for i, sku_tuple in enumerate(sku_tuples):
+                logger.info(f"Training individual model {i+1}/{len(sku_tuples)}: {sku_tuple}")
+                
+                # Prepare dataset for this single SKU
+                dataset = self.data_loader.prepare_modeling_dataset([sku_tuple], modeling_strategy)
+                models = self.model_trainer.train_model(dataset, model_type)
+                processed_models = self._process_trained_models(models, dataset, f"{exp_name}_sku_{sku_tuple[0]}x{sku_tuple[1]}")
+                all_models.extend(processed_models)
+                
+            return all_models
+        else:
+            raise ValueError(f"Unknown modeling strategy: {modeling_strategy}")
+    
+    def _process_trained_models(self, models: List[BenchmarkModel], dataset: ModelingDataset, exp_name: str) -> List[BenchmarkModel]:
+        """Process and register trained models with experiment logging."""
+        processed_models = []
+        
+        for model in models:
             # Register model in memory
             model_id = self.model_registry.register_model(model)
             
-            # Use release manager for persistence
-            from .release_management import ReleaseManagerFactory
-            release_manager = ReleaseManagerFactory.get_manager(model_type)
-            if release_manager:
-                # Create version from experiment name and model info
-                version = f"{exp_name}_{model_id}_{model_type}"
-                release_manager.export_release(version, model, self.output_dir)
-                logger.info(f"Model released using {release_manager.__class__.__name__}: version {version}")
-            else:
-                logger.warning(f"No release manager found for model type: {model_type}")
-            
-            # Log experiment
+            # Log experiment using dataset statistics
             experiment_record = {
                 "experiment_name": exp_name,
                 "model_id": model_id,
-                "modeling_strategy": ModelingStrategy.COMBINED.value,
-                "sku_tuples": sku_tuples,
-                "model_type": model_type,
+                "modeling_strategy": dataset.modeling_strategy.value,
+                "sku_tuples": dataset.sku_tuples,
+                "model_type": model.metadata.model_type,
                 "quantile_level": model.metadata.quantile_level,
-                "n_samples": len(X),
-                "n_features": len(feature_cols),
-                "split_date": str(split_date),
+                "n_samples": dataset.dataset_stats["n_samples_total"],
+                "n_features": dataset.dataset_stats["n_features"],
+                "split_date": dataset.split_info["split_date"],
                 "performance": model.metadata.performance_metrics
             }
-            self.experiment_log.append(experiment_record)
-            trained_models.append(model)
+            self.experiment_log["experiments"].append(experiment_record)
+            processed_models.append(model)
             
-            logger.info(f"Combined model trained for {len(sku_tuples)} SKUs. Model ID: {model_id}")
+            logger.info(f"Model trained: {model_id} with RMSE: {model.metadata.performance_metrics.get('rmse', 'N/A'):.4f}")
         
-        return trained_models
-
-    def _train_individual_model(self, sku_tuples: SkuList, model_type: str, exp_name: str, 
-                               current: int, total: int) -> List[BenchmarkModel]:
-        """Train individual model(s) for a single SKU (now supports multi-quantile)."""
-        logger.info(f"Training individual model {current}/{total}: {sku_tuples[0]}")
-        
-        # Get data for this SKU
-        features_df, target_df = self.data_loader.get_data_for_tuples(
-            sku_tuples, ModelingStrategy.INDIVIDUAL, collect=True
-        )
-        
-        # Prepare features for modeling
-        X, y, feature_cols = self.data_loader.prepare_features_for_modeling(
-            features_df, target_df, self.data_config.target_column
-        )
-        
-        logger.info(f"Individual model dataset: {len(X)} samples, {len(feature_cols)} features")
-        
-        # Create temporal split
-        if self.data_config.split_date:
-            train_bdids, test_bdids, split_date = self.data_loader.create_temporal_split_by_date(
-                X, self.data_config.split_date
-            )
-        else:
-            train_bdids, test_bdids, split_date = self.data_loader.create_temporal_split(
-                X, self.data_config.validation_split
-            )
-        
-        # Split data
-        X_train = X.filter(pl.col("bdID").is_in(train_bdids))
-        y_train = y.filter(pl.col("bdID").is_in(train_bdids))
-        X_test = X.filter(pl.col("bdID").is_in(test_bdids))
-        y_test = y.filter(pl.col("bdID").is_in(test_bdids))
-        
-        # Train model(s) with specified type - now returns list of models for multi-quantile
-        models = self.model_trainer.train_model(
-            X_train, y_train, X_test, y_test,
-            feature_cols, self.data_config.target_column,
-            ModelingStrategy.INDIVIDUAL, sku_tuples, model_type
-        )
-        
-        # Process each trained model
-        trained_models = []
-        for model in models:
-            # Update data split info
-            model.data_split.split_date = str(split_date)
-            
-            # Register model in memory
-            model_id = self.model_registry.register_model(model)
-            
-            # Use release manager for persistence
-            from .release_management import ReleaseManagerFactory
-            release_manager = ReleaseManagerFactory.get_manager(model_type)
-            if release_manager:
-                # Create version from experiment name and model info
-                version = f"{exp_name}_{model_id}_{model_type}"
-                release_manager.export_release(version, model, self.output_dir)
-                logger.info(f"Model released using {release_manager.__class__.__name__}: version {version}")
-            else:
-                logger.warning(f"No release manager found for model type: {model_type}")
-            
-            # Log experiment
-            experiment_record = {
-                "experiment_name": exp_name,
-                "model_id": model_id,
-                "modeling_strategy": ModelingStrategy.INDIVIDUAL.value,
-                "sku_tuples": sku_tuples,
-                "model_type": model_type,
-                "quantile_level": model.metadata.quantile_level,
-                "n_samples": len(X),
-                "n_features": len(feature_cols),
-                "split_date": str(split_date),
-                "performance": model.metadata.performance_metrics
-            }
-            self.experiment_log.append(experiment_record)
-            trained_models.append(model)
-            
-            logger.info(f"Individual model trained for SKU {sku_tuples[0]}. Model ID: {model_id}")
-        
-        return trained_models
+        return processed_models
 
     def evaluate_all_models(self) -> Dict[str, Any]:
         """Evaluate all models in the registry."""
@@ -292,33 +264,6 @@ class BenchmarkPipeline:
         logger.info(f"Evaluation completed for {len(all_model_ids)} models")
         return evaluation_results
 
-    def save_evaluation_results(self, evaluation_results: Dict[str, Any]):
-        """Save evaluation results to files."""
-        results_dir = self.output_dir / "evaluation_results"
-        results_dir.mkdir(exist_ok=True)
-        
-        # Save main results
-        import json
-        with open(results_dir / "evaluation_results.json", "w") as f:
-            json.dump(evaluation_results, f, indent=2, default=str)
-        
-        # Generate and save reports for each strategy
-        for strategy, results in evaluation_results.items():
-            if strategy != "overall" and "error" not in results:
-                report = self.evaluator.generate_evaluation_report(
-                    results, 
-                    results_dir / f"{strategy}_evaluation_report.md"
-                )
-        
-        logger.info(f"Evaluation results saved to {results_dir}")
-
-    def save_experiment_log(self):
-        """Save experiment log to file."""
-        log_path = self.output_dir / "experiment_log.json"
-        import json
-        with open(log_path, "w") as f:
-            json.dump(self.experiment_log, f, indent=2, default=str)
-        logger.info(f"Experiment log saved to {log_path}")
 
     def _make_json_serializable(self, obj):
         """Helper to make objects JSON serializable."""

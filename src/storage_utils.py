@@ -55,23 +55,12 @@ class ModelStorageLocation:
             sanitized = sanitized or "default"
         return sanitized[:255]  # Limit length
     
-    @classmethod
-    def from_sku_tuple(cls, sku_tuple: SkuTuple, model_type: str, 
-                      model_instance: str = "default") -> 'ModelStorageLocation':
-        """Create storage location from SKU tuple (backward compatibility)."""
-        product_id, store_id = sku_tuple
-        return cls(
-            store_id=store_id,
-            product_id=product_id,
-            model_type=model_type,
-            model_instance=model_instance
-        )
     
     @classmethod
-    def from_sku_tuple_with_quantile(cls, sku_tuple: SkuTuple, model_type: str,
-                                   quantile_level: Optional[float] = None,
-                                   model_instance: str = "default") -> 'ModelStorageLocation':
-        """Create storage location from SKU tuple with quantile level."""
+    def from_sku_tuple(cls, sku_tuple: SkuTuple, model_type: str,
+                      quantile_level: Optional[float] = None,
+                      model_instance: str = "default") -> 'ModelStorageLocation':
+        """Create storage location from SKU tuple with optional quantile level."""
         product_id, store_id = sku_tuple
         return cls(
             store_id=store_id,

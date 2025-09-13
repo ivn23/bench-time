@@ -1,8 +1,7 @@
 """
 Standard XGBoost regression model implementation.
 
-This module implements the standard XGBoost regressor using the sklearn-style interface,
-maintaining backward compatibility with the existing framework implementation.
+This module implements the standard XGBoost regressor using the sklearn-style interface.
 """
 
 from typing import Any, Dict, Optional
@@ -17,8 +16,8 @@ class XGBoostStandardModel(BaseModel):
     """
     Standard XGBoost regression model using sklearn-style interface.
     
-    This implementation maintains backward compatibility with the existing
-    framework while conforming to the BaseModel interface.
+    This implementation conforms to the BaseModel interface for consistent
+    model handling throughout the framework.
     """
     
     MODEL_TYPE = "xgboost_standard"

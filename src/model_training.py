@@ -12,7 +12,7 @@ import logging
 
 from .data_structures import (
     BenchmarkModel, ModelMetadata, DataSplit, ModelingStrategy, SkuList,
-    TrainingConfig
+    TrainingConfig, ModelingDataset
 )
 
 logger = logging.getLogger(__name__)
@@ -24,66 +24,37 @@ class ModelTrainer:
     def __init__(self, training_config: TrainingConfig):
         self.config = training_config
     
-    def train_model(self,
-                   X_train: pl.DataFrame,
-                   y_train: pl.DataFrame, 
-                   X_test: pl.DataFrame,
-                   y_test: pl.DataFrame,
-                   feature_cols: List[str],
-                   target_col: str,
-                   modeling_strategy: ModelingStrategy,
-                   sku_tuples: SkuList,
-                   model_type: str) -> List[BenchmarkModel]:
+    def train_model(self, dataset: ModelingDataset, model_type: str) -> List[BenchmarkModel]:
         """
-        Train model(s) with fixed hyperparameters using model factory pattern.
-        Now supports multiple quantile levels for quantile models.
+        Train model(s) using ModelingDataset with simplified interface.
+        Supports multiple quantile levels for quantile models.
         
         Args:
-            X_train, y_train: Training data
-            X_test, y_test: Test data for evaluation
-            feature_cols: List of feature column names
-            target_col: Target column name
-            modeling_strategy: How SKUs are being modeled (combined vs individual)
-            sku_tuples: List of (product_id, store_id) tuples being modeled
-            model_type: Type of model to train
+            dataset: Complete modeling dataset with all necessary data
+            model_type: Type of model to train (should match configured type)
             
         Returns:
             List of trained BenchmarkModel(s) - multiple models for multi-quantile configs
         """
-        logger.info(f"Training {model_type} model with {modeling_strategy.value} strategy for {len(sku_tuples)} SKU(s)")
-        
-        # Get model-specific configuration
-        model_config = self.config.get_model_config(model_type)
+        # Validate that the provided model_type matches the configured type
+        if model_type != self.config.model_type:
+            raise ValueError(f"Model type mismatch: expected {self.config.model_type}, got {model_type}")
+            
+        logger.info(f"Training {model_type} model with {dataset.modeling_strategy.value} strategy for {len(dataset.sku_tuples)} SKU(s)")
         
         # Check if this is a multi-quantile configuration
-        quantile_alphas = model_config.effective_quantile_alphas
+        quantile_alphas = self.config.model_config.quantile_alphas
         
         if quantile_alphas is not None:
             # Train multiple quantile models
-            return self._train_quantile_models(
-                X_train, y_train, X_test, y_test, feature_cols, target_col,
-                modeling_strategy, sku_tuples, model_type, quantile_alphas
-            )
+            return self._train_quantile_models(dataset, model_type, quantile_alphas)
         else:
             # Train single standard model
-            model = self._train_single_model(
-                X_train, y_train, X_test, y_test, feature_cols, target_col,
-                modeling_strategy, sku_tuples, model_type, quantile_alpha=None
-            )
+            model = self._train_single_model(dataset, model_type, quantile_alpha=None)
             return [model]
 
     
-    def _train_quantile_models(self,
-                              X_train: pl.DataFrame,
-                              y_train: pl.DataFrame,
-                              X_test: pl.DataFrame,
-                              y_test: pl.DataFrame,
-                              feature_cols: List[str],
-                              target_col: str,
-                              modeling_strategy: ModelingStrategy,
-                              sku_tuples: SkuList,
-                              model_type: str,
-                              quantile_alphas: List[float]) -> List[BenchmarkModel]:
+    def _train_quantile_models(self, dataset: ModelingDataset, model_type: str, quantile_alphas: List[float]) -> List[BenchmarkModel]:
         """Train multiple quantile models for different quantile levels."""
         models = []
         
@@ -92,36 +63,23 @@ class ModelTrainer:
         for quantile_alpha in quantile_alphas:
             logger.info(f"Training quantile model for alpha={quantile_alpha}")
             
-            model = self._train_single_model(
-                X_train, y_train, X_test, y_test, feature_cols, target_col,
-                modeling_strategy, sku_tuples, model_type, quantile_alpha
-            )
+            model = self._train_single_model(dataset, model_type, quantile_alpha)
             models.append(model)
         
         logger.info(f"Completed training {len(models)} quantile models")
         return models
     
-    def _train_single_model(self,
-                           X_train: pl.DataFrame,
-                           y_train: pl.DataFrame,
-                           X_test: pl.DataFrame,
-                           y_test: pl.DataFrame,
-                           feature_cols: List[str],
-                           target_col: str,
-                           modeling_strategy: ModelingStrategy,
-                           sku_tuples: SkuList,
-                           model_type: str,
-                           quantile_alpha: Optional[float] = None) -> BenchmarkModel:
-        """Train a single model (quantile or standard)."""
+    def _train_single_model(self, dataset: ModelingDataset, model_type: str, quantile_alpha: Optional[float] = None) -> BenchmarkModel:
+        """Train a single model (quantile or standard) using ModelingDataset."""
         
         # Convert to numpy arrays for training
-        X_train_np = X_train.select(feature_cols).to_numpy()
-        y_train_np = y_train.select(target_col).to_numpy().flatten()
-        X_test_np = X_test.select(feature_cols).to_numpy()
-        y_test_np = y_test.select(target_col).to_numpy().flatten()
+        X_train_np = dataset.X_train.select(dataset.feature_cols).to_numpy()
+        y_train_np = dataset.y_train.select(dataset.target_col).to_numpy().flatten()
+        X_test_np = dataset.X_test.select(dataset.feature_cols).to_numpy()
+        y_test_np = dataset.y_test.select(dataset.target_col).to_numpy().flatten()
         
-        # Get model-specific configuration
-        model_config = self.config.get_model_config(model_type)
+        # Get the single model configuration
+        model_config = self.config.model_config
         hyperparameters = model_config.merge_with_defaults()
         
         # Ensure random_state is set
@@ -152,19 +110,19 @@ class ModelTrainer:
         )
         
         # Extract primary SKU for hierarchical storage
-        primary_sku = sku_tuples[0]  # Use first SKU as primary
+        primary_sku = dataset.sku_tuples[0]  # Use first SKU as primary
         product_id, store_id = primary_sku
         
         # Create model metadata with quantile-aware hierarchical storage support
-        model_id_parts = [modeling_strategy.value, f"{len(sku_tuples)}skus", model_type]
+        model_id_parts = [dataset.modeling_strategy.value, f"{len(dataset.sku_tuples)}skus", model_type]
         if quantile_alpha is not None:
             model_id_parts.append(f"q{quantile_alpha}")
         model_id = "_".join(model_id_parts)
         
         metadata = ModelMetadata(
             model_id=model_id,
-            modeling_strategy=modeling_strategy,
-            sku_tuples=sku_tuples,
+            modeling_strategy=dataset.modeling_strategy,
+            sku_tuples=dataset.sku_tuples,
             model_type=model_type,
             store_id=store_id,
             product_id=product_id,
@@ -172,17 +130,15 @@ class ModelTrainer:
             hyperparameters=hyperparameters,
             training_config=self.config.__dict__,
             performance_metrics=metrics,
-            feature_columns=feature_cols,
-            target_column=target_col
+            feature_columns=dataset.feature_cols,
+            target_column=dataset.target_col
         )
         
-        # Create data split info
-        train_bdids = X_train.select("bdID").to_numpy().flatten()
-        test_bdids = X_test.select("bdID").to_numpy().flatten()
-        
+        # Create data split info from dataset split_info
         data_split = DataSplit(
-            train_bdIDs=train_bdids,
-            validation_bdIDs=test_bdids  # Using test as validation for consistency
+            train_bdIDs=dataset.split_info["train_bdids"],
+            validation_bdIDs=dataset.split_info["test_bdids"],  # Using test as validation for consistency
+            split_date=dataset.split_info["split_date"]
         )
         
         # Create benchmark model

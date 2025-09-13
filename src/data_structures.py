@@ -6,7 +6,9 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional, Union, Tuple
 from enum import Enum
 import numpy as np
+import polars as pl
 from pathlib import Path
+from datetime import datetime
 from .storage_utils import ModelStorageLocation
 
 
@@ -46,23 +48,6 @@ class ModelMetadata:
     storage_location: Optional[str] = None  # Full storage path
     quantile_level: Optional[float] = None  # Quantile level for quantile models
     
-    @classmethod
-    def from_sku_tuple(cls, sku_tuple: SkuTuple, model_type: str, **kwargs) -> 'ModelMetadata':
-        """Create ModelMetadata from a single SKU tuple."""
-        product_id, store_id = sku_tuple
-        return cls(
-            store_id=store_id,
-            product_id=product_id,
-            model_type=model_type,
-            sku_tuples=[sku_tuple],
-            **kwargs
-        )
-    
-    def get_sku_tuple(self) -> SkuTuple:
-        """Get the primary SKU tuple for this model."""
-        return (self.product_id, self.store_id)
-
-
 @dataclass
 class DataSplit:
     """Information about train/validation splits without storing actual data."""
@@ -106,6 +91,17 @@ class BenchmarkModel:
         )
 
 
+@dataclass
+class ExperimentResults:
+    """Container for complete experiment results before release packaging."""
+    models: List[BenchmarkModel]
+    evaluation_results: Optional[Dict[str, Any]]  # Optional metrics from ModelEvaluator
+    experiment_log: Dict[str, Any]
+    configurations: Dict[str, Any]  # DataConfig, TrainingConfig
+    experiment_name: str
+    timestamp: datetime
+
+
 class ModelRegistry:
     """Simplified registry for in-memory storage and management of benchmark models.
     
@@ -119,7 +115,7 @@ class ModelRegistry:
         # Note: storage_path kept for compatibility but not used for persistence
         # Persistence is now handled by release management system
         self.storage_path = storage_path or Path("benchmark_results")
-        self.storage_path.mkdir(exist_ok=True)
+        # Removed directory creation - ComprehensiveReleaseManager handles all persistence
     
     def register_model(self, model: BenchmarkModel) -> str:
         """Register a new model in the registry."""
@@ -139,6 +135,21 @@ class ModelRegistry:
             mid for mid, model in self.models.items() 
             if model.metadata.modeling_strategy == modeling_strategy
         ]
+
+
+@dataclass
+class ModelingDataset:
+    """Complete dataset ready for model training."""
+    X_train: pl.DataFrame
+    y_train: pl.DataFrame
+    X_test: pl.DataFrame
+    y_test: pl.DataFrame
+    feature_cols: List[str]
+    target_col: str
+    split_info: Dict[str, Any]  # Contains split_date, train_bdids, test_bdids
+    dataset_stats: Dict[str, Any]  # Contains n_samples, n_features
+    sku_tuples: SkuList
+    modeling_strategy: ModelingStrategy
 
 
 @dataclass
@@ -163,57 +174,7 @@ class DataConfig:
     # Temporal split configuration - consolidated in DataConfig
     validation_split: float = 0.2          # Default 80/20 split
     split_date: Optional[str] = None       # If provided, overrides validation_split
-    
-    def get_split_strategy(self) -> Tuple[str, Union[float, str]]:
-        """Return split strategy and parameter."""
-        if self.split_date:
-            return "date", self.split_date
-        return "percentage", self.validation_split
-    
-    def validate_paths(self) -> List[str]:
-        """Validate that required data files exist."""
-        from pathlib import Path
-        errors = []
-        
-        for path_name, path_value in [
-            ("features_path", self.features_path),
-            ("target_path", self.target_path),
-            ("mapping_path", self.mapping_path)
-        ]:
-            if not Path(path_value).exists():
-                errors.append(f"{path_name} does not exist: {path_value}")
-        
-        return errors
-    
-    def validate_split_config(self) -> List[str]:
-        """Validate split configuration."""
-        errors = []
-        
-        if self.validation_split <= 0 or self.validation_split >= 1:
-            errors.append("validation_split must be between 0 and 1")
-        
-        if self.split_date:
-            try:
-                from datetime import datetime
-                datetime.strptime(self.split_date, "%Y-%m-%d")
-            except ValueError:
-                errors.append("split_date must be in YYYY-MM-DD format")
-        
-        return errors
 
-
-@dataclass
-class ModelSelectionConfig:
-    """Configuration for specifying which models to train."""
-    model_types: List[str] = field(default_factory=lambda: ["xgboost_standard"])
-    train_all_available: bool = False  # If True, ignore model_types and train all available
-    
-    def get_models_to_train(self) -> List[str]:
-        """Get list of model types to train."""
-        if self.train_all_available:
-            from .model_types import model_registry
-            return model_registry.list_available_types()
-        return self.model_types
 
 
 @dataclass
@@ -222,8 +183,7 @@ class ModelTypeConfig:
     model_type: str
     hyperparameters: Dict[str, Any] = field(default_factory=dict)
     model_specific_params: Dict[str, Any] = field(default_factory=dict)
-    quantile_alpha: Optional[float] = None  # For single quantile 
-    quantile_alphas: Optional[List[float]] = None  # For multiple quantile levels
+    quantile_alphas: Optional[List[float]] = None  # For quantile levels
     
     def __post_init__(self):
         """Validate quantile configuration after initialization."""
@@ -231,29 +191,12 @@ class ModelTypeConfig:
         if self.quantile_alphas is not None:
             for alpha in self.quantile_alphas:
                 if not (0 < alpha < 1):
-                    raise ValueError(f"quantile_alpha must be between 0 and 1, got {alpha}")
-        
-        if self.quantile_alpha is not None:
-            if not (0 < self.quantile_alpha < 1):
-                raise ValueError(f"quantile_alpha must be between 0 and 1, got {self.quantile_alpha}")
-        
-        # Handle quantile compatibility
-        if self.quantile_alpha is not None and self.quantile_alphas is not None:
-            raise ValueError("Cannot specify both quantile_alpha and quantile_alphas")
-    
-    @property
-    def effective_quantile_alphas(self) -> Optional[List[float]]:
-        """Get the effective list of quantile alphas (backward compatibility)."""
-        if self.quantile_alphas is not None:
-            return self.quantile_alphas
-        elif self.quantile_alpha is not None:
-            return [self.quantile_alpha]
-        return None
+                    raise ValueError(f"quantile_alphas values must be between 0 and 1, got {alpha}")
     
     @property
     def is_quantile_model(self) -> bool:
         """Check if this configuration represents a quantile model."""
-        return self.quantile_alpha is not None or self.quantile_alphas is not None
+        return self.quantile_alphas is not None
     
     def merge_with_defaults(self) -> Dict[str, Any]:
         """Merge config hyperparameters with model type defaults."""
@@ -266,59 +209,22 @@ class ModelTypeConfig:
 
 @dataclass
 class TrainingConfig:
-    """Simplified configuration for model training."""
+    """Simplified configuration for single model type training."""
     random_state: int = 42
     
-    # Model selection configuration
-    model_selection: ModelSelectionConfig = field(default_factory=ModelSelectionConfig)
+    # Single model configuration (replaces multi-model complexity)
+    model_config: ModelTypeConfig = field(default_factory=lambda: ModelTypeConfig(model_type="xgboost_standard"))
     
-    # Per-model-type configurations
-    model_configs: Dict[str, ModelTypeConfig] = field(default_factory=dict)
-    
-    def get_model_config(self, model_type: str) -> ModelTypeConfig:
-        """Get configuration for a specific model type."""
-        if model_type not in self.model_configs:
-            # Create default config for this model type
-            self.model_configs[model_type] = ModelTypeConfig(model_type=model_type)
-        return self.model_configs[model_type]
-    
-    def add_model_config(self, model_type: str, **kwargs) -> 'TrainingConfig':
-        """Add or update configuration for a specific model type."""
+    def set_model_config(self, model_type: str, **kwargs) -> 'TrainingConfig':
+        """Set the single model configuration."""
         config_dict = {'model_type': model_type}
         config_dict.update(kwargs)
         
-        # Handle quantile lists for backward compatibility
-        if 'quantile_alphas' in kwargs and 'quantile_alpha' in kwargs:
-            raise ValueError("Cannot specify both quantile_alpha and quantile_alphas")
         
-        self.model_configs[model_type] = ModelTypeConfig(**config_dict)
-        
-        # Automatically add model type to model selection if not already present
-        if model_type not in self.model_selection.model_types:
-            # If we're adding the first non-default model, replace the defaults
-            if self.model_selection.model_types == ["xgboost_standard"] and model_type != "xgboost_standard":
-                self.model_selection.model_types = [model_type]
-            else:
-                self.model_selection.model_types.append(model_type)
-        
+        self.model_config = ModelTypeConfig(**config_dict)
         return self
     
-    def validate_configuration(self) -> List[str]:
-        """Validate the training configuration and return any errors."""
-        errors = []
-        
-        # Validate model types
-        from .model_types import model_registry
-        available_types = set(model_registry.list_available_types())
-        
-        for model_type in self.model_selection.get_models_to_train():
-            if model_type not in available_types:
-                errors.append(f"Unknown model type: {model_type}")
-        
-        # Validate quantile configurations
-        for model_type, config in self.model_configs.items():
-            if (config.quantile_alpha is not None and 
-                not model_registry.requires_quantile(model_type)):
-                errors.append(f"Model type {model_type} does not support quantile parameters")
-        
-        return errors
+    @property
+    def model_type(self) -> str:
+        """Get the configured model type."""
+        return self.model_config.model_type
