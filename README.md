@@ -1,6 +1,6 @@
 # M5 Time Series Benchmarking Framework
 
-A production-ready, tuple-based framework for time series forecasting on M5 competition data. Features dual modeling strategies (COMBINED and INDIVIDUAL), centralized metrics calculation, dynamic model discovery, multi-quantile regression support, PyTorch Lightning neural networks, statistical baselines, and comprehensive model lifecycle management with complete experiment tracking.
+A production-ready, tuple-based framework for time series forecasting on M5 competition data. Features dual modeling strategies (COMBINED and INDIVIDUAL), centralized metrics calculation, dynamic model discovery, multi-quantile regression support, PyTorch Lightning neural networks, statistical baselines, comprehensive release management system, and complete model lifecycle management with experiment tracking.
 
 ## Key Features
 
@@ -11,6 +11,8 @@ A production-ready, tuple-based framework for time series forecasting on M5 comp
 **Dynamic Model Discovery**: Plugin architecture with ModelTypeRegistry automatically discovers and registers available model types, supporting XGBoost (standard/quantile), PyTorch Lightning neural networks, and statistical baselines.
 
 **Multi-Quantile Regression Support**: Native support for quantile models with multiple quantile levels, coverage probability analysis, and specialized neural network implementations for uncertainty quantification and risk assessment.
+
+**Release Management System**: Comprehensive model lifecycle management with unified interfaces, type-specific managers, version control, and deployment support for enterprise-ready model operations.
 
 **Fixed Hyperparameter Training**: Direct hyperparameter specification eliminates optimization complexity, enabling rapid experimentation cycles with predetermined parameters.
 
@@ -24,32 +26,48 @@ A production-ready, tuple-based framework for time series forecasting on M5 comp
 
 ```
 src/
-├── data_structures.py      # Core data models: ModelingStrategy enum, SKU tuples, configurations
-├── data_loading.py          # Polars-based data loading with tuple filtering
-├── model_training.py        # Model training coordination with factory pattern
-├── evaluation.py            # Comprehensive evaluation and visualization
-├── benchmark_pipeline.py    # End-to-end orchestration and workflow management
-├── metrics.py              # Centralized metrics calculation system
-├── model_types.py          # Dynamic model discovery and registration
-├── storage_utils.py        # Hierarchical model storage utilities
-└── models/
-    ├── base.py               # Abstract base model interface
-    ├── xgboost_standard.py   # Standard XGBoost implementation
-    ├── xgboost_quantile.py   # Quantile XGBoost implementation
-    ├── lightning_quantile.py # PyTorch Lightning quantile models
-    └── statquant_model.py    # Statistical quantile baseline
+├── Core Framework Files
+│   ├── data_structures.py          # Foundation: enums, dataclasses, type system
+│   ├── data_loading.py             # Polars-based data operations with tuple filtering
+│   ├── model_training.py           # Factory-pattern training with multi-quantile support
+│   ├── evaluation.py               # Comprehensive evaluation and visualization
+│   ├── benchmark_pipeline.py       # End-to-end orchestration and workflow management
+│   ├── metrics.py                  # Centralized metrics calculation system
+│   ├── model_types.py              # Dynamic model discovery and registration
+│   └── storage_utils.py            # Hierarchical model storage utilities
+│
+├── Model Implementations
+│   ├── models/base.py              # Abstract base model interface
+│   ├── models/xgboost_standard.py # Standard XGBoost implementation
+│   ├── models/xgboost_quantile.py # Quantile XGBoost implementation
+│   ├── models/lightning_quantile.py # PyTorch Lightning quantile models
+│   ├── models/lightning_standard.py # PyTorch Lightning standard models
+│   └── models/statquant_model.py  # Statistical quantile baseline
+│
+└── Release Management System
+    ├── comprehensive_manager.py    # Main release manager
+    ├── factory.py                 # Model type factory pattern
+    ├── base.py                    # Base classes for release management
+    ├── utils.py                   # Utility functions
+    └── managers/                  # Type-specific managers
+        ├── xgboost_standard_manager.py
+        ├── xgboost_quantile_manager.py
+        ├── lightning_standard_manager.py
+        ├── lightning_quantile_manager.py
+        └── statquant_manager.py
 ```
 
 **Core Components:**
 
 - **ModelingStrategy**: COMBINED (unified model) vs INDIVIDUAL (per-SKU models)
 - **DataLoader**: Efficient tuple-based data filtering and temporal splitting
-- **ModelTrainer**: Coordinated training with dynamic model type support
+- **ModelTrainer**: Coordinated training with dynamic model type support and multi-quantile capabilities
 - **ModelEvaluator**: Multi-metric evaluation with centralized metrics calculation
 - **MetricsCalculator**: Unified metrics computation with quantile support
 - **ModelTypeRegistry**: Dynamic model discovery with plugin architecture
 - **BenchmarkPipeline**: Complete workflow orchestration with experiment tracking
 - **ModelRegistry**: Hierarchical model storage and lifecycle management
+- **ComprehensiveReleaseManager**: Production-ready model lifecycle management
 
 ## Installation
 
@@ -211,7 +229,125 @@ for model in quantile_models:
     print(f"SKU {model.metadata.sku_tuples[0]}: Coverage Probability = {coverage}")
 ```
 
+### Multi-Quantile Models
+
+```python
+# Configure multi-quantile training for comprehensive uncertainty analysis
+training_config = TrainingConfig(
+    validation_split=0.2,
+    random_state=42
+)
+
+# Add multi-quantile configuration
+training_config.add_model_config(
+    model_type="xgboost_quantile",
+    hyperparameters={
+        "n_estimators": 100,
+        "max_depth": 6,
+        "learning_rate": 0.3,
+        "random_state": 42
+    },
+    quantile_alphas=[0.1, 0.5, 0.9]  # Multiple quantile levels
+)
+
+pipeline = BenchmarkPipeline(data_config, training_config)
+pipeline.load_and_prepare_data()
+
+# Train models for multiple quantile levels
+multi_quantile_models = pipeline.run_experiment(
+    sku_tuples=sku_tuples,
+    modeling_strategy=ModelingStrategy.INDIVIDUAL,
+    experiment_name="multi_quantile_analysis"
+)
+
+# Analyze results across quantile levels
+print(f"Trained {len(multi_quantile_models)} models across quantile levels")
+for model in multi_quantile_models:
+    sku = model.metadata.sku_tuples[0]
+    quantile_level = model.metadata.quantile_level
+    coverage = model.metadata.performance_metrics.get('coverage_probability', 'N/A')
+    print(f"SKU {sku}, α={quantile_level}: Coverage = {coverage}")
+```
+
+### PyTorch Lightning Neural Networks
+
+```python
+# Configure Lightning quantile model for deep learning approach
+lightning_config = TrainingConfig(
+    validation_split=0.2,
+    random_state=42
+)
+
+# Add Lightning quantile model configuration
+lightning_config.add_model_config(
+    model_type="lightning_quantile",
+    hyperparameters={
+        "quantile_alpha": 0.1,
+        "hidden_size": 64,
+        "num_layers": 2,
+        "learning_rate": 0.001,
+        "max_epochs": 50,
+        "deterministic": True  # For reproducible results
+    }
+)
+
+pipeline_lightning = BenchmarkPipeline(data_config, lightning_config)
+pipeline_lightning.load_and_prepare_data()
+
+# Train neural network quantile models
+lightning_models = pipeline_lightning.run_experiment(
+    sku_tuples=sku_tuples,
+    modeling_strategy=ModelingStrategy.INDIVIDUAL,
+    experiment_name="lightning_quantile"
+)
+
+# Examine neural network model results
+for model in lightning_models:
+    metrics = model.metadata.performance_metrics
+    pinball_loss = metrics.get('quantile_loss', 'N/A')
+    coverage = metrics.get('coverage_probability', 'N/A')
+    print(f"Lightning model - Pinball Loss: {pinball_loss}, Coverage: {coverage}")
+```
+
+### Statistical Baseline Models
+
+```python
+# Use statistical quantile baseline for comparison
+training_config.add_model_config(
+    model_type="statquant_model",
+    hyperparameters={
+        "quantile_alpha": 0.1,
+        "method": "linear"  # Interpolation method
+    }
+)
+
+# Statistical models provide fast baseline comparisons
+baseline_models = pipeline.run_experiment(
+    sku_tuples=sku_tuples,
+    modeling_strategy=ModelingStrategy.INDIVIDUAL,
+    experiment_name="statistical_baseline"
+)
+```
+
 ## Advanced Usage
+
+### Release Management System
+
+```python
+from src import ComprehensiveReleaseManager
+
+# Initialize release manager for model lifecycle management
+release_manager = ComprehensiveReleaseManager()
+
+# Deploy models to production environment
+release_manager.deploy_models(model_ids, environment="production")
+
+# Track model performance in production
+performance_metrics = release_manager.monitor_models(model_ids)
+
+# Version control for model updates
+release_manager.create_model_version(model_id, version_notes="Updated hyperparameters")
+```
 
 ### Custom Hyperparameter Configuration
 
@@ -250,6 +386,19 @@ advanced_training_config.add_model_config(
         "n_jobs": -1
     }
 )
+
+# Configure Lightning standard neural network
+advanced_training_config.add_model_config(
+    model_type="lightning_standard",
+    hyperparameters={
+        "hidden_size": 128,
+        "num_layers": 3,
+        "learning_rate": 0.001,
+        "max_epochs": 100,
+        "batch_size": 64,
+        "dropout": 0.1
+    }
+)
 ```
 
 ### Model Type Discovery and Registry Operations
@@ -261,19 +410,21 @@ from src.model_types import model_registry
 # Discover available model types
 available_types = model_registry.list_available_types()
 print(f"Available model types: {available_types}")
+# Output: ['xgboost_standard', 'xgboost_quantile', 'lightning_standard', 'lightning_quantile', 'statquant_model']
 
 # Get information about specific model type
 model_info = model_registry.get_model_info("xgboost_quantile")
 print(f"Description: {model_info.description}")
 print(f"Requires quantile: {model_info.requires_quantile}")
-print(f"Default params: {model_info.default_hyperparameters}")
+print(f"Default hyperparameters: {model_info.default_hyperparameters}")
 
 # Work directly with model registry
 registry = ModelRegistry(Path("my_models"))
 
-# List all models
+# List models by strategy
 all_models = registry.list_models()
 combined_models = registry.list_models(ModelingStrategy.COMBINED)
+individual_models = registry.list_models(ModelingStrategy.INDIVIDUAL)
 
 # Load specific model
 model = registry.load_model("combined_3tuples_12345_xgboost_standard")
@@ -297,21 +448,34 @@ from src import DataLoader, ModelTrainer, ModelEvaluator
 data_loader = DataLoader(data_config)
 features_df, target_df, mapping = data_loader.load_data()
 
-# Filter data for specific SKUs
+# Filter data for specific SKUs with enhanced filtering
 sku_features, sku_target = data_loader.get_data_for_tuples(
     [(80558, 2), (80558, 5)], 
     ModelingStrategy.COMBINED
 )
 
-# Prepare data for modeling
-X, y, feature_cols = data_loader.prepare_features_for_modeling(sku_features, sku_target)
+# Prepare complete modeling dataset
+modeling_dataset = data_loader.prepare_modeling_dataset(
+    sku_tuples=[(80558, 2), (80558, 5)],
+    modeling_strategy=ModelingStrategy.COMBINED,
+    validation_split=0.2
+)
 
-# Create temporal split
-train_bdids, val_bdids, split_date = data_loader.create_temporal_split(X, 0.2)
-
-# Train model directly
+# Train model directly with enhanced trainer
 trainer = ModelTrainer(training_config)
-# ... continue with training workflow
+trained_models = trainer.train_model(
+    modeling_dataset=modeling_dataset,
+    model_type="xgboost_standard",
+    model_instance="custom_experiment"
+)
+
+# Evaluate with comprehensive metrics
+evaluator = ModelEvaluator()
+evaluation_results = evaluator.evaluate_model_with_data(
+    model=trained_models[0],
+    X_data=modeling_dataset.X_test,
+    y_data=modeling_dataset.y_test
+)
 ```
 
 ## Data Requirements
@@ -342,7 +506,11 @@ benchmark_results/
 │   │   ├── model.pkl                # Serialized XGBoost model
 │   │   ├── metadata.json            # Complete model metadata
 │   │   └── data_splits.json         # Train/validation split info
-│   └── individual_80558x2_xgboost/
+│   ├── individual_80558x2_xgboost/
+│   │   ├── model.pkl
+│   │   ├── metadata.json
+│   │   └── data_splits.json
+│   └── quantile_0.1_individual_80558x2_xgboost/  # Quantile-specific storage
 │       ├── model.pkl
 │       ├── metadata.json
 │       └── data_splits.json
@@ -350,7 +518,13 @@ benchmark_results/
 │   ├── evaluation_results.json      # Complete evaluation data
 │   ├── combined_evaluation_report.md
 │   └── individual_evaluation_report.md
-└── experiment_log.json             # Complete experiment audit trail
+├── experiment_logs/                 # Experiment tracking
+│   ├── experiment_log.json          # Complete experiment audit trail
+│   └── performance_tracking.json    # Model performance over time
+└── release_management/              # Production deployment
+    ├── deployed_models.json         # Currently deployed models
+    ├── model_versions.json          # Model version history
+    └── deployment_logs/             # Deployment audit trails
 ```
 
 ## Evaluation Metrics
@@ -375,7 +549,12 @@ The framework uses a centralized **MetricsCalculator** to ensure consistent eval
 
 **Quantile-Specific Metrics** (for quantile models):
 - **Coverage Probability**: Actual coverage vs. theoretical quantile level
-- **Quantile Loss**: Specialized loss function for quantile regression evaluation
+- **Quantile Loss (Pinball Loss)**: Specialized asymmetric loss function for quantile regression evaluation
+
+**Multi-Quantile Metrics**:
+- **Prediction Intervals**: Confidence intervals from multiple quantile levels
+- **Interval Coverage**: Actual vs. expected interval coverage rates
+- **Interval Width**: Average prediction interval width for uncertainty assessment
 
 All metrics are calculated through the centralized system, ensuring consistency across training, evaluation, and comparison workflows.
 
@@ -387,19 +566,28 @@ The framework includes comprehensive tests with 80/20 integration focus:
 # Run complete test suite
 pytest tests/ -v
 
-# Run integration tests only
+# Run integration tests only (includes new features)
 pytest tests/test_integration.py -v
 
+# Run multi-quantile specific tests
+pytest tests/test_multi_quantile.py tests/test_quantile_models.py -v
+
 # Run component tests
-pytest tests/test_data_loading.py tests/test_model_training.py -v
+pytest tests/test_data_loading.py tests/test_model_training.py tests/test_evaluation.py -v
 
 # Quick functionality check
 pytest tests/test_basic_integration.py -v
+
+# Test statistical models
+pytest tests/test_statquant_model.py -v
 ```
 
 **Test Features**:
 - Realistic mock data generation (5 SKUs × 50 days)
-- Both COMBINED and INDIVIDUAL strategy coverage
+- Comprehensive coverage of COMBINED and INDIVIDUAL strategies
+- Multi-quantile model testing with coverage analysis
+- Lightning neural network integration testing
+- Release management system validation
 - Temporal directory isolation for test independence
 - Fast execution (< 30 seconds total runtime)
 
@@ -433,19 +621,23 @@ pip install -r requirements.txt
 
 ## Framework Evolution
 
-This framework represents a significant evolution from complex granularity-based modeling to streamlined tuple-based approaches:
+This framework represents a significant evolution from complex granularity-based modeling to streamlined tuple-based approaches with comprehensive production features:
 
-**Key Changes**:
+**Key Enhancements**:
 - **Simplified Architecture**: Tuple-based SKU identification replaces hierarchical granularities
 - **Strategy Clarity**: COMBINED vs INDIVIDUAL modeling strategies address practical decisions
+- **Production Ready**: Release management system for enterprise deployment
+- **Multi-Framework Support**: XGBoost, PyTorch Lightning, and statistical models
+- **Advanced Quantile Support**: Multi-quantile regression with uncertainty quantification
+- **Comprehensive Testing**: Enhanced test coverage with integration focus
 - **Performance Focus**: Fixed hyperparameters enable rapid experimentation cycles
 - **Real-world Alignment**: (product_id, store_id) tuples map directly to business entities
 
 **Design Philosophy**:
-- **Simplicity**: Intuitive interfaces over complex abstractions
-- **Speed**: Fast training cycles for iterative experimentation  
-- **Reliability**: Comprehensive testing with production-ready error handling
-- **Extensibility**: Clear patterns for adding new models and strategies
+- **Simplicity with Power**: Intuitive interfaces with comprehensive capabilities
+- **Speed with Quality**: Fast training cycles for iterative experimentation with production-ready quality
+- **Extensibility with Stability**: Easy extension without breaking existing functionality
+- **Integration with Modularity**: Complete workflows with modular components
 
 ## Contributing
 
@@ -459,8 +651,10 @@ When extending the framework:
 
 4. **Storage Extensions**: Extend `storage_utils.py` functions to support new storage backends or metadata formats.
 
-5. **Testing**: Prioritize integration tests that cover complete workflows, following the existing 80/20 testing approach.
+5. **Release Management**: Add new managers in `release_management/managers/` for specialized model lifecycle handling.
 
-The plugin architecture makes most extensions seamless - new model types are automatically discovered, metrics are centrally calculated, and storage follows established patterns.
+6. **Testing**: Prioritize integration tests that cover complete workflows, following the existing 80/20 testing approach.
 
-Refer to `context/comprehensive_code_analysis.md` for detailed architectural insights and testing documentation for guidelines.
+The plugin architecture makes most extensions seamless - new model types are automatically discovered, metrics are centrally calculated, storage follows established patterns, and the release management system adapts to new model types.
+
+Refer to `context/comprehensive_code_analysis.md` for detailed architectural insights and `context/test_overview.md` for testing documentation and guidelines.

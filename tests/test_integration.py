@@ -161,36 +161,48 @@ class TestPipelineIntegration:
             individual_results = evaluation_results["individual"]
             assert "model_evaluations" in individual_results
         
-        # Test save_evaluation_results output
-        pipeline.save_evaluation_results(evaluation_results)
+        # Test comprehensive release functionality
+        release_dir = pipeline.run_complete_experiment(
+            sku_tuples=[(80558, 2)],
+            modeling_strategy=ModelingStrategy.COMBINED,
+            experiment_name="test_comprehensive_release",
+            evaluate=True
+        )
         
-        # Assert evaluation_results.json exists
-        evaluation_dir = temp_output_dir / "evaluation_results"
-        assert evaluation_dir.exists()
-        assert (evaluation_dir / "evaluation_results.json").exists()
+        # Assert release directory and structure exists
+        assert release_dir.exists()
+        assert (release_dir / "bundle.json").exists()
+        assert (release_dir / "metrics.json").exists()  # Since evaluate=True
+        assert (release_dir / "models").exists()
+        assert (release_dir / "logs").exists()
+        assert (release_dir / "README.md").exists()
         
-        # Check that the JSON file is valid
+        # Check that the bundle.json file is valid
         import json
-        with open(evaluation_dir / "evaluation_results.json") as f:
-            saved_results = json.load(f)
-        assert isinstance(saved_results, dict)
+        with open(release_dir / "bundle.json") as f:
+            bundle_data = json.load(f)
+        assert isinstance(bundle_data, dict)
+        assert "experiment_name" in bundle_data
+        assert "models" in bundle_data
+        assert "data_config" in bundle_data
+        assert "training_config" in bundle_data
         
-        # Check for strategy-specific reports
-        if "combined" in evaluation_results:
-            combined_report = evaluation_dir / "combined_evaluation_report.md"
-            assert combined_report.exists()
-            # Verify report contains expected content
-            with open(combined_report) as f:
-                report_content = f.read()
-            assert "# Model Evaluation Report" in report_content
+        # Check logs directory content
+        logs_dir = release_dir / "logs"
+        assert (logs_dir / "experiment_log.json").exists()
         
-        if "individual" in evaluation_results:
-            individual_report = evaluation_dir / "individual_evaluation_report.md"
-            assert individual_report.exists()
-            # Verify report contains expected content
-            with open(individual_report) as f:
-                report_content = f.read()
-            assert "# Model Evaluation Report" in report_content
+        # Verify experiment log contains expected content
+        with open(logs_dir / "experiment_log.json") as f:
+            log_data = json.load(f)
+        assert isinstance(log_data, dict)
+        assert "experiments" in log_data
+        
+        # Verify README.md exists and has content
+        readme_path = release_dir / "README.md"
+        with open(readme_path) as f:
+            readme_content = f.read()
+        assert "# Experiment Release:" in readme_content
+        assert "test_comprehensive_release" in readme_content
 
     @pytest.mark.integration 
     def test_split_date_workflow(
@@ -320,8 +332,8 @@ class TestPipelineIntegration:
         )
         
         # Check experiment log was created
-        assert len(pipeline.experiment_log) > 0
-        log_entry = pipeline.experiment_log[0]
+        assert len(pipeline.experiment_log["experiments"]) > 0
+        log_entry = pipeline.experiment_log["experiments"][0]
         
         # Validate log entry structure
         expected_keys = [
@@ -331,19 +343,8 @@ class TestPipelineIntegration:
         for key in expected_keys:
             assert key in log_entry
         
-        # Save experiment log
-        pipeline.save_experiment_log()
-        
-        # Check log file was created
-        log_file = temp_output_dir / "experiment_log.json"
-        assert log_file.exists()
-        
-        # Verify log file is valid JSON
-        import json
-        with open(log_file) as f:
-            loaded_log = json.load(f)
-        assert isinstance(loaded_log, list)
-        assert len(loaded_log) > 0
+        # Note: Experiment logging is now handled by run_complete_experiment()
+        # which creates comprehensive release directories with logs included
 
     @pytest.mark.integration
     def test_quantile_model_workflow(
@@ -690,12 +691,8 @@ class TestPipelineIntegration:
             assert 'rmse' in individual_results['rankings']
             assert len(individual_results['rankings']['rmse']) >= 1  # At least 1 model
         
-        # Test saving evaluation results
-        pipeline.save_evaluation_results(evaluation_results)
-        
-        # Verify files are created
-        results_file = temp_output_dir / "evaluation_results" / "evaluation_results.json"
-        assert results_file.exists()
+        # Note: Evaluation results saving is now handled by run_complete_experiment()
+        # which creates comprehensive release directories with metrics included
 
     @pytest.mark.integration
     def test_lightning_mixed_with_xgboost_workflow(

@@ -31,11 +31,15 @@ def test_basic_pipeline_workflow():
         )
         
         training_config = TrainingConfig()
-        # Use minimal hyperparameters for fast testing
-        training_config.hyperparameters = {
-            "n_estimators": 5,
-            "max_depth": 2
-        }
+        # Use simplified configuration for single model type
+        training_config.set_model_config(
+            model_type="xgboost_standard",
+            hyperparameters={
+                "n_estimators": 5,  # Minimal for fast testing
+                "max_depth": 2,
+                "random_state": 42
+            }
+        )
         
         # Initialize pipeline
         pipeline = BenchmarkPipeline(

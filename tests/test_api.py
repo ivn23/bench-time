@@ -29,18 +29,20 @@ class TestPublicAPIImports:
 
     def test_import_data_structures(self):
         """Test importing data structure classes."""
-        from src import ModelMetadata, DataSplit, BenchmarkModel, ModelRegistry
+        from src import ModelMetadata, DataSplit, BenchmarkModel, ModelRegistry, ModelingDataset
         
         assert ModelMetadata is not None
         assert DataSplit is not None
         assert BenchmarkModel is not None
         assert ModelRegistry is not None
+        assert ModelingDataset is not None
         
         # Check they're actually classes
         assert callable(ModelMetadata)
         assert callable(DataSplit)
         assert callable(BenchmarkModel)
         assert callable(ModelRegistry)
+        assert callable(ModelingDataset)
 
     def test_import_config_classes(self):
         """Test importing configuration classes."""
@@ -76,7 +78,7 @@ class TestPublicAPIImports:
         """Test importing all public components at once."""
         from src import (
             ModelingStrategy, SkuTuple, SkuList, ModelMetadata, DataSplit, 
-            BenchmarkModel, ModelRegistry, DataConfig, TrainingConfig,
+            BenchmarkModel, ModelRegistry, DataConfig, TrainingConfig, ModelingDataset,
             DataLoader, ModelTrainer, ModelEvaluator, VisualizationGenerator,
             BenchmarkPipeline
         )
@@ -84,7 +86,7 @@ class TestPublicAPIImports:
         # All should be importable without error
         components = [
             ModelingStrategy, SkuTuple, SkuList, ModelMetadata, DataSplit,
-            BenchmarkModel, ModelRegistry, DataConfig, TrainingConfig,
+            BenchmarkModel, ModelRegistry, DataConfig, TrainingConfig, ModelingDataset,
             DataLoader, ModelTrainer, ModelEvaluator, VisualizationGenerator,
             BenchmarkPipeline
         ]
@@ -104,7 +106,7 @@ class TestPublicAPIImports:
         expected_exports = [
             'ModelingStrategy', 'SkuTuple', 'SkuList', 'ModelMetadata', 
             'DataSplit', 'BenchmarkModel', 'ModelRegistry', 'DataConfig', 
-            'TrainingConfig', 'DataLoader', 'ModelTrainer', 'ModelEvaluator',
+            'TrainingConfig', 'ModelingDataset', 'DataLoader', 'ModelTrainer', 'ModelEvaluator',
             'VisualizationGenerator', 'BenchmarkPipeline'
         ]
         
@@ -226,8 +228,8 @@ class TestAPIConsistency:
         
         # BenchmarkPipeline expected methods
         expected_pipeline_methods = [
-            'load_and_prepare_data', 'run_experiment', 'evaluate_all_models',
-            'save_evaluation_results', 'save_experiment_log'
+            'load_and_prepare_data', 'run_experiment', 'run_complete_experiment', 
+            'evaluate_all_models', 'evaluate_models'
         ]
         
         for method in expected_pipeline_methods:
@@ -243,7 +245,7 @@ class TestAPIConsistency:
         
         # DataLoader expected methods
         expected_loader_methods = [
-            'load_data', 'get_data_for_tuples', 'prepare_features_for_modeling',
+            'load_data', 'prepare_modeling_dataset', 'create_temporal_split',
             'create_temporal_split_by_date'
         ]
         
@@ -277,8 +279,7 @@ class TestAPIConsistency:
         training_config = TrainingConfig()
         
         expected_training_attrs = [
-            'validation_split', 'random_state', 'cv_folds', 'model_type',
-            'hyperparameters', 'model_params'
+            'random_state', 'model_config', 'model_type'
         ]
         
         for attr in expected_training_attrs:
