@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Tuple
 
-from src import DataConfig, TrainingConfig, ModelingStrategy
+from src import DataConfig, ModelTypeConfig, ModelingStrategy
 from tests.fixtures.sample_data import (
     generate_sample_features_data,
     generate_sample_target_data, 
@@ -76,12 +76,9 @@ def sample_data_config_with_split_date(temp_data_dir):
     )
 
 @pytest.fixture
-def sample_training_config():
-    """Create simplified TrainingConfig for testing."""
-    config = TrainingConfig(random_state=42)
-    
-    # Set single model configuration using simplified architecture
-    config.set_model_config(
+def sample_model_config():
+    """Create simplified ModelTypeConfig for testing."""
+    return ModelTypeConfig(
         model_type="xgboost_standard",
         hyperparameters={
             "n_estimators": 10,  # Small for fast testing
@@ -91,8 +88,6 @@ def sample_training_config():
             "n_jobs": 1  # Pin parallelism for reproducible tests
         }
     )
-    
-    return config
 
 @pytest.fixture
 def sample_sku_tuples():
@@ -149,12 +144,9 @@ def prepared_model_data(sample_features_df, sample_target_df):
     return X, y, feature_cols
 
 @pytest.fixture
-def sample_quantile_training_config():
-    """Create TrainingConfig for quantile model testing."""
-    config = TrainingConfig(random_state=42)
-    
-    # Set quantile model configuration
-    config.set_model_config(
+def sample_quantile_model_config():
+    """Create ModelTypeConfig for quantile model testing."""
+    return ModelTypeConfig(
         model_type="xgboost_quantile",
         hyperparameters={
             "n_estimators": 10,  # Small for fast testing
@@ -165,5 +157,3 @@ def sample_quantile_training_config():
         },
         quantile_alphas=[0.1, 0.5, 0.9]  # Multi-quantile configuration
     )
-    
-    return config

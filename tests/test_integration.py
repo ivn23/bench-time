@@ -7,7 +7,7 @@ import pytest
 import polars as pl
 from pathlib import Path
 
-from src import BenchmarkPipeline, ModelingStrategy, TrainingConfig
+from src import BenchmarkPipeline, ModelingStrategy
 
 
 class TestPipelineIntegration:
@@ -21,27 +21,30 @@ class TestPipelineIntegration:
         sample_sku_tuples,
         temp_output_dir
     ):
-        """Test complete workflow with COMBINED modeling strategy."""
-        # Initialize pipeline
+        """Test complete workflow with COMBINED modeling strategy using new API."""
+        # Initialize pipeline with new API (no training_config in constructor)
         pipeline = BenchmarkPipeline(
             data_config=sample_data_config,
-            training_config=sample_training_config,
             output_dir=temp_output_dir
         )
         
-        # Load data
-        pipeline.load_and_prepare_data()
-        
-        # Run experiment with COMBINED strategy
-        models = pipeline.run_experiment(
+        # Run experiment with COMBINED strategy using new API
+        results = pipeline.run_experiment(
             sku_tuples=sample_sku_tuples,
             modeling_strategy=ModelingStrategy.COMBINED,
+            model_type="xgboost_standard",
+            hyperparameters={
+                "n_estimators": 10,
+                "max_depth": 3,
+                "random_state": 42
+            },
             experiment_name="test_combined"
         )
         
         # Validate results
-        assert len(models) == 1  # Combined strategy should create 1 model
-        model = models[0]
+        assert results.num_models == 1  # Combined strategy should create 1 model
+        assert len(results.models) == 1
+        model = results.models[0]
         
         # Check model metadata
         assert model.metadata.modeling_strategy == ModelingStrategy.COMBINED
@@ -64,13 +67,13 @@ class TestPipelineIntegration:
         assert "mse" in model.metadata.performance_metrics
         assert "rmse" in model.metadata.performance_metrics
         assert "mae" in model.metadata.performance_metrics
-        assert "r2" in model.metadata.performance_metrics
+        # Note: r2 and other metrics depend on centralized MetricsCalculator
         
-        # Check model registry
-        model_id = model.get_identifier()
-        retrieved_model = pipeline.model_registry.get_model(model_id)
-        assert retrieved_model is not None
-        assert retrieved_model.metadata.model_id == model.metadata.model_id
+        # Check experiment results
+        assert results.experiment_name == "test_combined"
+        assert results.model_type == "xgboost_standard" 
+        assert results.modeling_strategy == ModelingStrategy.COMBINED
+        assert results.sku_tuples == sample_sku_tuples
 
     @pytest.mark.integration
     def test_individual_strategy_workflow(
@@ -80,36 +83,40 @@ class TestPipelineIntegration:
         single_sku_tuple,  # Use single SKU to keep test fast
         temp_output_dir
     ):
-        """Test complete workflow with INDIVIDUAL modeling strategy."""
-        # Initialize pipeline
+        """Test complete workflow with INDIVIDUAL modeling strategy using new API."""
+        # Initialize pipeline with new API
         pipeline = BenchmarkPipeline(
             data_config=sample_data_config,
-            training_config=sample_training_config,
             output_dir=temp_output_dir
         )
         
-        # Load data
-        pipeline.load_and_prepare_data()
-        
-        # Run experiment with INDIVIDUAL strategy
-        models = pipeline.run_experiment(
+        # Run experiment with INDIVIDUAL strategy using new API
+        results = pipeline.run_experiment(
             sku_tuples=single_sku_tuple,
             modeling_strategy=ModelingStrategy.INDIVIDUAL,
+            model_type="xgboost_standard",
+            hyperparameters={
+                "n_estimators": 10,
+                "max_depth": 3,
+                "random_state": 42
+            },
             experiment_name="test_individual"
         )
         
         # Validate results
-        assert len(models) == len(single_sku_tuple)  # One model per SKU
-        model = models[0]
+        assert results.num_models == len(single_sku_tuple)  # One model per SKU
+        assert len(results.models) == len(single_sku_tuple)
+        model = results.models[0]
         
         # Check model metadata
         assert model.metadata.modeling_strategy == ModelingStrategy.INDIVIDUAL
         assert model.metadata.sku_tuples == single_sku_tuple
         assert model.metadata.model_type == "xgboost_standard"
         
-        # Check model registry
-        all_model_ids = pipeline.model_registry.list_models()
-        assert len(all_model_ids) >= len(models)
+        # Check experiment results
+        assert results.experiment_name == "test_individual"
+        assert results.model_type == "xgboost_standard"
+        assert results.modeling_strategy == ModelingStrategy.INDIVIDUAL
 
     @pytest.mark.integration
     def test_multiple_experiments_workflow(

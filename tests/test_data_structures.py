@@ -13,9 +13,8 @@ import numpy as np
 
 from src import (
     ModelingStrategy, SkuTuple, SkuList, ModelMetadata, DataSplit, 
-    BenchmarkModel, ModelRegistry, DataConfig, TrainingConfig
+    BenchmarkModel, ModelRegistry, DataConfig
 )
-from src.data_structures import ModelSelectionConfig
 
 
 @pytest.fixture
@@ -485,99 +484,3 @@ class TestDataConfig:
         assert config.max_date is None
         assert config.split_date is None
 
-
-class TestTrainingConfig:
-    """Test TrainingConfig dataclass."""
-
-    def test_training_config_creation(self):
-        """Test creating TrainingConfig instance."""
-        config = TrainingConfig(
-            random_state=123
-        )
-        
-        assert config.random_state == 123
-        assert isinstance(config.model_selection, ModelSelectionConfig)
-        assert config.model_configs == {}
-
-    def test_training_config_defaults(self):
-        """Test TrainingConfig default values."""
-        config = TrainingConfig()
-        
-        # Check defaults
-        assert config.random_state == 42
-        assert isinstance(config.model_selection, ModelSelectionConfig)
-        assert config.model_configs == {}
-
-    def test_training_config_serialization(self):
-        """Test TrainingConfig can be serialized."""
-        config = TrainingConfig(
-            random_state=456
-        )
-        
-        # Add a model config
-        config.add_model_config(
-            model_type="xgboost_standard",
-            hyperparameters={"n_estimators": 150}
-        )
-        
-        # Convert to dict (as done in model training)
-        config_dict = config.__dict__
-        
-        assert config_dict["random_state"] == 456
-        assert "xgboost_standard" in config_dict["model_configs"]
-        
-        # Should be JSON serializable with helper function
-        def make_serializable(obj):
-            if hasattr(obj, '__dict__'):
-                return obj.__dict__
-            return str(obj)
-        
-        json_str = json.dumps(config_dict, default=make_serializable)
-        loaded_dict = json.loads(json_str)
-        
-        assert loaded_dict["random_state"] == 456
-
-    def test_multi_quantile_configuration(self):
-        """Test TrainingConfig with multi-quantile configuration."""
-        config = TrainingConfig()
-        
-        # Add multi-quantile configuration
-        config.add_model_config(
-            model_type="xgboost_quantile",
-            quantile_alphas=[0.1, 0.5, 0.9],
-            hyperparameters={"n_estimators": 100}
-        )
-        
-        model_config = config.get_model_config("xgboost_quantile")
-        assert model_config.quantile_alphas == [0.1, 0.5, 0.9]
-        assert model_config.quantile_alpha is None
-        assert model_config.effective_quantile_alphas == [0.1, 0.5, 0.9]
-        assert model_config.is_quantile_model is True
-    
-    def test_backward_compatibility_single_quantile(self):
-        """Test backward compatibility with single quantile_alpha."""
-        config = TrainingConfig()
-        
-        # Add single quantile configuration (old way)
-        config.add_model_config(
-            model_type="xgboost_quantile",
-            quantile_alpha=0.7,
-            hyperparameters={"n_estimators": 100}
-        )
-        
-        model_config = config.get_model_config("xgboost_quantile")
-        assert model_config.quantile_alpha == 0.7
-        assert model_config.quantile_alphas is None
-        assert model_config.effective_quantile_alphas == [0.7]
-        assert model_config.is_quantile_model is True
-    
-    def test_quantile_conflict_validation(self):
-        """Test validation prevents conflicting quantile parameters."""
-        config = TrainingConfig()
-        
-        with pytest.raises(ValueError, match="Cannot specify both quantile_alpha and quantile_alphas"):
-            config.add_model_config(
-                model_type="xgboost_quantile",
-                quantile_alpha=0.5,
-                quantile_alphas=[0.1, 0.9]
-            )

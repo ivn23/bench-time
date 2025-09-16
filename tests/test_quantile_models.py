@@ -311,31 +311,6 @@ class TestModelTrainerIntegration:
         assert "q0.75" in model.get_identifier()
 
 
-class TestBackwardCompatibility:
-    """Test that existing functionality still works."""
-    
-    def test_standard_config_still_works(self):
-        """Test that existing TrainingConfig usage still works."""
-        # This should work exactly as before
-        config = TrainingConfig(
-            model_type="xgboost",
-            hyperparameters={
-                "n_estimators": 100,
-                "max_depth": 6
-            }
-        )
-        
-        assert config.model_type == "xgboost"
-        assert config.quantile_alpha is None
-        
-    def test_model_factory_handles_legacy_type(self):
-        """Test that model factory works with legacy 'xgboost' type."""
-        model_class = get_model_class("xgboost")
-        model = model_class(n_estimators=10)
-        
-        assert model.model_type == "xgboost"
-        assert isinstance(model, XGBoostStandardModel)
-
 
 class TestLightningQuantileModel:
     """Test Lightning quantile model implementation."""

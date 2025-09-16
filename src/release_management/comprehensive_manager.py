@@ -6,11 +6,10 @@ import json
 import logging
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 
-from ..data_structures import ExperimentResults, BenchmarkModel
+from ..data_structures import BenchmarkModel
 from ..storage_utils import HierarchicalStorageManager
-from .factory import ReleaseManagerFactory
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +34,7 @@ class ComprehensiveReleaseManager:
     
     def create_complete_release(
         self, 
-        experiment_results: ExperimentResults, 
+        experiment_results: Any, 
         base_output_dir: Path
     ) -> Path:
         """
@@ -71,7 +70,7 @@ class ComprehensiveReleaseManager:
         logger.info(f"Release created successfully at: {release_dir}")
         return release_dir
     
-    def _create_bundle_json(self, experiment_results: ExperimentResults, release_dir: Path):
+    def _create_bundle_json(self, experiment_results: Any, release_dir: Path):
         """Create bundle.json with merged configs and metadata."""
         logger.debug("Creating bundle.json")
         
@@ -113,11 +112,17 @@ class ComprehensiveReleaseManager:
         models_dir.mkdir(parents=True, exist_ok=True)
         
         for model in models:
-            # Get appropriate release manager for this model type
-            release_manager = ReleaseManagerFactory.get_manager_for_model(model)
+            # Create model filename based on SKU information
+            if model.metadata.sku_tuples:
+                # For individual models, use first SKU tuple
+                sku = model.metadata.sku_tuples[0]
+                model_filename = f"model_{sku[1]}_{sku[0]}"  # store_id, product_id
+            else:
+                # Fallback for combined models or models without SKU info
+                model_filename = "model"
             
-            # Use existing model-specific persistence logic
-            release_manager.save_model_object(models_dir, model)
+            # Use the model's own save_model method
+            model.model.save_model(str(models_dir), model_filename)
         
         logger.debug(f"Models saved to: {models_dir}")
     
@@ -172,7 +177,7 @@ class ComprehensiveReleaseManager:
         
         logger.debug(f"Experiment log saved: {log_path}")
     
-    def _create_readme(self, experiment_results: ExperimentResults, release_dir: Path):
+    def _create_readme(self, experiment_results: Any, release_dir: Path):
         """Create auto-generated README.md with experiment summary."""
         logger.debug("Creating README.md")
         
@@ -184,7 +189,7 @@ class ComprehensiveReleaseManager:
         
         logger.debug(f"README created: {readme_path}")
     
-    def _generate_readme_content(self, experiment_results: ExperimentResults) -> str:
+    def _generate_readme_content(self, experiment_results: Any) -> str:
         """Generate README.md content."""
         models = experiment_results.models
         has_evaluation = experiment_results.evaluation_results is not None

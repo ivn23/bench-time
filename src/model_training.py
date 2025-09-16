@@ -6,13 +6,13 @@ Supports XGBoost and extensible to other algorithms.
 import xgboost as xgb
 import numpy as np
 import polars as pl
-from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 from typing import Dict, Any, List, Tuple, Optional
 import logging
 
+from .model_types import model_registry
 from .data_structures import (
-    BenchmarkModel, ModelMetadata, DataSplit, ModelingStrategy, SkuList,
-    TrainingConfig, ModelingDataset
+    TrainedModel, DataSplit, ModelingStrategy, SkuList,
+    ModelTypeConfig, ModelingDataset
 )
 
 logger = logging.getLogger(__name__)
@@ -21,29 +21,33 @@ logger = logging.getLogger(__name__)
 class ModelTrainer:
     """Model training with fixed hyperparameters."""
     
-    def __init__(self, training_config: TrainingConfig):
-        self.config = training_config
+    def __init__(self, model_config: ModelTypeConfig, random_state: int = 42):
+        self.model_config = model_config
+        self.random_state = random_state
     
-    def train_model(self, dataset: ModelingDataset, model_type: str) -> List[BenchmarkModel]:
+    def train_model(self, dataset: ModelingDataset, model_type: str) -> List['TrainedModel']:
         """
         Train model(s) using ModelingDataset with simplified interface.
         Supports multiple quantile levels for quantile models.
+        
+        PURE TRAINING: Returns TrainedModel objects without any evaluation logic.
+        All metrics calculation is handled by ModelEvaluator.
         
         Args:
             dataset: Complete modeling dataset with all necessary data
             model_type: Type of model to train (should match configured type)
             
         Returns:
-            List of trained BenchmarkModel(s) - multiple models for multi-quantile configs
+            List of trained TrainedModel(s) - multiple models for multi-quantile configs
         """
         # Validate that the provided model_type matches the configured type
-        if model_type != self.config.model_type:
-            raise ValueError(f"Model type mismatch: expected {self.config.model_type}, got {model_type}")
+        if model_type != self.model_config.model_type:
+            raise ValueError(f"Model type mismatch: expected {self.model_config.model_type}, got {model_type}")
             
         logger.info(f"Training {model_type} model with {dataset.modeling_strategy.value} strategy for {len(dataset.sku_tuples)} SKU(s)")
         
         # Check if this is a multi-quantile configuration
-        quantile_alphas = self.config.model_config.quantile_alphas
+        quantile_alphas = self.model_config.quantile_alphas
         
         if quantile_alphas is not None:
             # Train multiple quantile models
@@ -54,7 +58,7 @@ class ModelTrainer:
             return [model]
 
     
-    def _train_quantile_models(self, dataset: ModelingDataset, model_type: str, quantile_alphas: List[float]) -> List[BenchmarkModel]:
+    def _train_quantile_models(self, dataset: ModelingDataset, model_type: str, quantile_alphas: List[float]) -> List['TrainedModel']:
         """Train multiple quantile models for different quantile levels."""
         models = []
         
@@ -69,8 +73,13 @@ class ModelTrainer:
         logger.info(f"Completed training {len(models)} quantile models")
         return models
     
-    def _train_single_model(self, dataset: ModelingDataset, model_type: str, quantile_alpha: Optional[float] = None) -> BenchmarkModel:
-        """Train a single model (quantile or standard) using ModelingDataset."""
+    def _train_single_model(self, dataset: ModelingDataset, model_type: str, quantile_alpha: Optional[float] = None) -> 'TrainedModel':
+        """
+        Train a single model (quantile or standard) using ModelingDataset.
+        
+        PURE TRAINING: No evaluation, metrics calculation, or test predictions.
+        Returns TrainedModel with only training results and basic metadata.
+        """
         
         # Convert to numpy arrays for training
         X_train_np = dataset.X_train.select(dataset.feature_cols).to_numpy()
@@ -79,11 +88,10 @@ class ModelTrainer:
         y_test_np = dataset.y_test.select(dataset.target_col).to_numpy().flatten()
         
         # Get the single model configuration
-        model_config = self.config.model_config
-        hyperparameters = model_config.merge_with_defaults()
+        hyperparameters = self.model_config.merge_with_defaults()
         
         # Ensure random_state is set
-        hyperparameters['random_state'] = self.config.random_state
+        hyperparameters['random_state'] = self.random_state
         
         logger.info(f"Using hyperparameters: {hyperparameters}")
         
@@ -97,43 +105,6 @@ class ModelTrainer:
             X_val=X_test_np, y_val=y_test_np, quantile_alpha=quantile_alpha
         )
         
-        # Make predictions on test set
-        test_predictions = final_model.predict(X_test_np)
-        
-        # Apply prediction clipping for integer targets
-        test_predictions = np.clip(np.round(test_predictions).astype(int), 0, None)
-        
-        # Calculate metrics using centralized metrics calculator
-        from .metrics import MetricsCalculator
-        metrics = MetricsCalculator.calculate_all_metrics(
-            y_test_np, test_predictions, quantile_alpha
-        )
-        
-        # Extract primary SKU for hierarchical storage
-        primary_sku = dataset.sku_tuples[0]  # Use first SKU as primary
-        product_id, store_id = primary_sku
-        
-        # Create model metadata with quantile-aware hierarchical storage support
-        model_id_parts = [dataset.modeling_strategy.value, f"{len(dataset.sku_tuples)}skus", model_type]
-        if quantile_alpha is not None:
-            model_id_parts.append(f"q{quantile_alpha}")
-        model_id = "_".join(model_id_parts)
-        
-        metadata = ModelMetadata(
-            model_id=model_id,
-            modeling_strategy=dataset.modeling_strategy,
-            sku_tuples=dataset.sku_tuples,
-            model_type=model_type,
-            store_id=store_id,
-            product_id=product_id,
-            quantile_level=quantile_alpha,  # Add quantile level to metadata
-            hyperparameters=hyperparameters,
-            training_config=self.config.__dict__,
-            performance_metrics=metrics,
-            feature_columns=dataset.feature_cols,
-            target_column=dataset.target_col
-        )
-        
         # Create data split info from dataset split_info
         data_split = DataSplit(
             train_bdIDs=dataset.split_info["train_bdids"],
@@ -141,26 +112,31 @@ class ModelTrainer:
             split_date=dataset.split_info["split_date"]
         )
         
-        # Create benchmark model
-        benchmark_model = BenchmarkModel(
-            metadata=metadata,
+        # Create TrainedModel with pure training results (NO METRICS)
+        trained_model = TrainedModel(
             model=final_model,
-            data_split=data_split
+            model_type=model_type,
+            modeling_strategy=dataset.modeling_strategy,
+            sku_tuples=dataset.sku_tuples,
+            hyperparameters=hyperparameters,
+            training_config={"model_config": self.model_config.__dict__, "random_state": self.random_state},
+            feature_columns=dataset.feature_cols,
+            target_column=dataset.target_col,
+            data_split=data_split,
+            quantile_level=quantile_alpha,
+            model_instance="default"
         )
         
-        logger.info(f"Model training completed. Primary metric: {metrics.get('rmse', metrics.get('mse', 'N/A'))}")
+        logger.info(f"Model training completed (no evaluation performed)")
         
-        return benchmark_model
+        return trained_model
     
     def _train_model_with_params(self, X_train: np.ndarray, y_train: np.ndarray, 
                                 hyperparameters: Dict[str, Any], model_type: str,
                                 X_val: np.ndarray = None, y_val: np.ndarray = None,
                                 quantile_alpha: float = None) -> Any:
         """Train model with specified hyperparameters using model factory."""
-        try:
-            # Import the model type registry
-            from .model_types import model_registry
-            
+        try:           
             # Get the appropriate model class
             model_class = model_registry.get_model_class(model_type)
             if model_class is None:
@@ -171,7 +147,7 @@ class ModelTrainer:
             
             # Add quantile parameter for quantile models if required
             if model_registry.requires_quantile(model_type) and quantile_alpha is not None:
-                model_instance = model_class(quantile_alpha=quantile_alpha, **model_params)
+                model_instance = model_class(quantile_alphas=[quantile_alpha], **model_params)
             else:
                 model_instance = model_class(**model_params)
             

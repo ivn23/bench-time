@@ -32,52 +32,22 @@ class MetricsCalculator:
         Raises:
             ValueError: If input arrays are invalid
         """
-        try:
-            # Validate inputs
-            if len(y_true) == 0 or len(y_pred) == 0:
-                raise ValueError("Input arrays cannot be empty")
-            
-            if len(y_true) != len(y_pred):
-                raise ValueError("Input arrays must have the same length")
-            
-            # Core regression metrics
-            metrics = {
-                "mse": float(mean_squared_error(y_true, y_pred)),
-                "rmse": float(np.sqrt(mean_squared_error(y_true, y_pred))),
-                "mae": float(mean_absolute_error(y_true, y_pred)),
-                "r2": float(r2_score(y_true, y_pred))
-            }
-            
-            # Additional error analysis
-            residuals = y_true - y_pred
-            metrics.update({
-                "max_error": float(np.max(np.abs(residuals))),
-                "mean_error": float(np.mean(residuals)),  # Bias measurement
-                "std_error": float(np.std(residuals))
-            })
-            
-            # Calculate MAPE (Mean Absolute Percentage Error) with zero-division protection
-            mask = y_true != 0
-            if np.any(mask):
-                mape = np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100
-                metrics["mape"] = float(mape)
-            else:
-                metrics["mape"] = float('inf')
-                
-            # Calculate accuracy within error bands
-            abs_errors = np.abs(residuals)
-            metrics.update({
-                "within_1_unit": float(np.mean(abs_errors <= 1.0)),
-                "within_2_units": float(np.mean(abs_errors <= 2.0)),
-                "within_5_units": float(np.mean(abs_errors <= 5.0))
-            })
-            
-            return metrics
-            
-        except Exception as e:
-            logger.error(f"Failed to calculate regression metrics: {str(e)}")
-            raise ValueError(f"Failed to calculate evaluation metrics: {str(e)}")
-    
+        # Validate inputs
+        if len(y_true) == 0 or len(y_pred) == 0:
+            raise ValueError("Input arrays cannot be empty")
+        
+        if len(y_true) != len(y_pred):
+            raise ValueError("Input arrays must have the same length")
+        
+        # Core regression metrics
+        metrics = {
+            "mse": float(mean_squared_error(y_true, y_pred)),
+            "rmse": float(np.sqrt(mean_squared_error(y_true, y_pred))),
+            "mae": float(mean_absolute_error(y_true, y_pred))
+        }
+
+        return metrics
+
     @staticmethod
     def calculate_quantile_metrics(y_true: np.ndarray, y_pred: np.ndarray, 
                                   quantile_alpha: float) -> Dict[str, float]:
@@ -95,44 +65,39 @@ class MetricsCalculator:
         Raises:
             ValueError: If input arrays are invalid or quantile_alpha is out of range
         """
-        try:
-            # Validate inputs
-            if len(y_true) == 0 or len(y_pred) == 0:
-                raise ValueError("Input arrays cannot be empty")
-                
-            if len(y_true) != len(y_pred):
-                raise ValueError("Input arrays must have the same length")
-                
-            if not 0 < quantile_alpha < 1:
-                raise ValueError("quantile_alpha must be between 0 and 1")
+        # Validate inputs
+        if len(y_true) == 0 or len(y_pred) == 0:
+            raise ValueError("Input arrays cannot be empty")
             
-            quantile_metrics = {}
+        if len(y_true) != len(y_pred):
+            raise ValueError("Input arrays must have the same length")
             
-            # Quantile loss (pinball loss)
-            residuals = y_true - y_pred
-            quantile_loss = np.where(
-                residuals >= 0,
-                quantile_alpha * residuals,
-                (quantile_alpha - 1) * residuals
-            )
-            quantile_metrics["quantile_score"] = float(np.mean(quantile_loss))
-            
-            # Coverage probability - proportion of actual values below predicted quantile
-            coverage = np.mean(y_true <= y_pred)
-            quantile_metrics["coverage_probability"] = float(coverage)
-            
-            # Coverage error - difference between actual and target coverage
-            coverage_error = abs(coverage - quantile_alpha)
-            quantile_metrics["coverage_error"] = float(coverage_error)
-            
-            # Store quantile alpha for reference
-            quantile_metrics["quantile_alpha"] = float(quantile_alpha)
-            
-            return quantile_metrics
-            
-        except Exception as e:
-            logger.error(f"Failed to calculate quantile metrics: {str(e)}")
-            raise ValueError(f"Failed to calculate quantile metrics: {str(e)}")
+        if not 0 < quantile_alpha < 1:
+            raise ValueError("quantile_alpha must be between 0 and 1")
+        
+        quantile_metrics = {}
+        
+        # Quantile loss (pinball loss)
+        residuals = y_true - y_pred
+        quantile_loss = np.where(
+            residuals >= 0,
+            quantile_alpha * residuals,
+            (quantile_alpha - 1) * residuals
+        )
+        quantile_metrics["quantile_score"] = float(np.mean(quantile_loss))
+        
+        # Coverage probability - proportion of actual values below predicted quantile
+        coverage = np.mean(y_true <= y_pred)
+        quantile_metrics["coverage_probability"] = float(coverage)
+        
+        # Coverage error - difference between actual and target coverage
+        coverage_error = abs(coverage - quantile_alpha)
+        quantile_metrics["coverage_error"] = float(coverage_error)
+        
+        # Store quantile alpha for reference
+        quantile_metrics["quantile_alpha"] = float(quantile_alpha)
+        
+        return quantile_metrics
     
     @staticmethod
     def calculate_all_metrics(y_true: np.ndarray, y_pred: np.ndarray, 
