@@ -6,9 +6,12 @@ following the framework's BaseModel interface.
 """
 
 import numpy as np
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple
 import warnings
+import logging
 from ..models.base import BaseModel, ModelTrainingError, ModelPredictionError
+
+logger = logging.getLogger(__name__)
 
 try:
     import statsmodels.api as sm
@@ -35,21 +38,27 @@ class StatQuantModel(BaseModel):
     }
     REQUIRES_QUANTILE = True
     
-    def __init__(self, quantile_alpha: float = 0.7, **model_params):
+    def __init__(self, quantile_alphas: List[float] = None, **model_params):
         """
         Initialize StatQuant model.
         
         Args:
-            quantile_alpha: Target quantile level (e.g., 0.7 for 70% quantile)
+            quantile_alphas: List of target quantile levels (e.g., [0.7] for 70% quantile)
             **model_params: Additional parameters for QuantReg
         """
         super().__init__(**model_params)
         
-        # Validate quantile_alpha
-        if not (0 < quantile_alpha < 1):
-            raise ValueError(f"quantile_alpha must be between 0 and 1, got {quantile_alpha}")
+        if quantile_alphas is None:
+            quantile_alphas = [0.7]
         
-        self.quantile_alpha = quantile_alpha
+        if not quantile_alphas or len(quantile_alphas) != 1:
+            raise ValueError("StatQuant model currently supports exactly one quantile level")
+        
+        # Validate quantile_alpha
+        if not (0 < quantile_alphas[0] < 1):
+            raise ValueError(f"quantile_alphas values must be between 0 and 1, got {quantile_alphas[0]}")
+        
+        self.quantile_alpha = quantile_alphas[0]  # Keep internal usage for now
         self.model_type = "statquant"
         self.fitted_model = None  # Store the fitted QuantReg results
         
@@ -83,8 +92,30 @@ class StatQuantModel(BaseModel):
             if len(y_train.shape) > 1:
                 y_train = y_train.ravel()
             
+            # Data cleaning for statsmodels compatibility
+            # Check for and handle inf/nan values
+            X_clean = X_train.copy()
+            y_clean = y_train.copy()
+            
+            # Replace inf values with finite values
+            X_clean = np.where(np.isinf(X_clean), np.nan, X_clean)
+            
+            # Handle NaN/Inf values by removing rows with any missing data
+            # This is necessary because statsmodels QuantReg is strict about data quality
+            if np.isnan(X_clean).any() or np.isnan(y_clean).any():
+                # Find rows with any NaN values
+                valid_mask = ~(np.isnan(X_clean).any(axis=1) | np.isnan(y_clean))
+                X_clean = X_clean[valid_mask]
+                y_clean = y_clean[valid_mask]
+                
+                logger.info(f"Removed {np.sum(~valid_mask)} rows with missing values for StatQuant training")
+            
+            # Ensure we still have enough data after cleaning
+            if len(X_clean) < 10:  # Minimum sample size check
+                raise ValueError("Insufficient clean data for StatQuant training (< 10 samples after cleaning)")
+            
             # Create QuantReg model - note that QuantReg expects (endog, exog)
-            self.model = QuantReg(endog=y_train, exog=X_train)
+            self.model = QuantReg(endog=y_clean, exog=X_clean)
             
             # Fit the model with specified quantile
             fit_params = {

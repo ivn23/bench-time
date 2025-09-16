@@ -35,19 +35,6 @@ class TestMultiQuantileConfiguration:
         assert config.effective_quantile_alphas == [0.1, 0.5, 0.9]
         assert config.is_quantile_model is True
     
-    def test_model_type_config_backward_compatibility(self):
-        """Test backward compatibility with single quantile_alpha."""
-        config = ModelTypeConfig(
-            model_type="xgboost_quantile",
-            quantile_alpha=0.7,
-            hyperparameters={"n_estimators": 100}
-        )
-        
-        assert config.quantile_alpha == 0.7
-        assert config.quantile_alphas is None
-        assert config.effective_quantile_alphas == [0.7]
-        assert config.is_quantile_model is True
-    
     def test_model_type_config_validation(self):
         """Test validation of quantile ranges."""
         # Test invalid quantile values
@@ -214,46 +201,6 @@ class TestMultiQuantileTraining:
             elif model.metadata.quantile_level == 0.9:
                 assert "q0.9" in model.metadata.model_id
     
-    def test_single_quantile_backward_compatibility(self, prepared_model_data):
-        """Test backward compatibility with single quantile configuration."""
-        X, y, feature_cols = prepared_model_data
-        
-        # Create training config with single quantile (old way)
-        training_config = TrainingConfig(random_state=42)
-        training_config.add_model_config(
-            model_type="xgboost_quantile",
-            quantile_alpha=0.7,
-            hyperparameters={"n_estimators": 10, "max_depth": 3}
-        )
-        
-        from src.model_training import ModelTrainer
-        
-        # Create simple train/test split
-        n_samples = len(X)
-        train_size = int(0.8 * n_samples)
-        train_bdids = X.select("bdID").to_numpy()[:train_size].flatten()
-        test_bdids = X.select("bdID").to_numpy()[train_size:].flatten()
-        
-        X_train = X.filter(X["bdID"].is_in(train_bdids))
-        y_train = y.filter(y["bdID"].is_in(train_bdids))
-        X_test = X.filter(X["bdID"].is_in(test_bdids))
-        y_test = y.filter(y["bdID"].is_in(test_bdids))
-        
-        # Train models
-        trainer = ModelTrainer(training_config)
-        models = trainer.train_model(
-            X_train, y_train, X_test, y_test,
-            feature_cols, "target",
-            ModelingStrategy.INDIVIDUAL, [(80558, 2)], "xgboost_quantile"
-        )
-        
-        # Check results
-        assert isinstance(models, list)
-        assert len(models) == 1  # Single quantile level
-        assert models[0].metadata.quantile_level == 0.7
-        assert "q0.7" in models[0].metadata.model_id
-
-    
     def test_statquant_model_trainer_returns_list(self, prepared_model_data, sample_feature_columns, tmp_path):
         """Test that ModelTrainer returns list of models for multi-quantile with StatQuant."""
         X, y, feature_cols = prepared_model_data
@@ -309,45 +256,6 @@ class TestMultiQuantileTraining:
             assert model.metadata.model_type == "statquant"
             assert hasattr(model.model, 'quantile_alpha')
     
-    def test_statquant_single_quantile_backward_compatibility(self, prepared_model_data):
-        """Test backward compatibility with single quantile configuration for StatQuant."""
-        X, y, feature_cols = prepared_model_data
-        
-        # Create training config with single quantile (old way)
-        training_config = TrainingConfig(random_state=42)
-        training_config.add_model_config(
-            model_type="statquant",
-            quantile_alpha=0.7,
-            hyperparameters={"method": "interior-point", "max_iter": 100}
-        )
-        
-        from src.model_training import ModelTrainer
-        
-        # Create simple train/test split
-        n_samples = len(X)
-        train_size = int(0.8 * n_samples)
-        train_bdids = X.select("bdID").to_numpy()[:train_size].flatten()
-        test_bdids = X.select("bdID").to_numpy()[train_size:].flatten()
-        
-        X_train = X.filter(X["bdID"].is_in(train_bdids))
-        y_train = y.filter(y["bdID"].is_in(train_bdids))
-        X_test = X.filter(X["bdID"].is_in(test_bdids))
-        y_test = y.filter(y["bdID"].is_in(test_bdids))
-        
-        # Train models
-        trainer = ModelTrainer(training_config)
-        models = trainer.train_model(
-            X_train, y_train, X_test, y_test,
-            feature_cols, "target",
-            ModelingStrategy.INDIVIDUAL, [(80558, 2)], "statquant"
-        )
-        
-        # Check results
-        assert isinstance(models, list)
-        assert len(models) == 1  # Single quantile level
-        assert models[0].metadata.quantile_level == 0.7
-        assert "q0.7" in models[0].metadata.model_id
-        assert models[0].metadata.model_type == "statquant"
 
 
 class TestMultiQuantileIntegration:

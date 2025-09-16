@@ -8,7 +8,7 @@ framework following the same patterns as other quantile models.
 
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 import numpy as np
 import torch
 import torch.nn as nn
@@ -109,12 +109,12 @@ class LightningQuantileModel(BaseModel):
     }
     REQUIRES_QUANTILE = True
     
-    def __init__(self, quantile_alpha: float = 0.7, **model_params):
+    def __init__(self, quantile_alphas: List[float] = None, **model_params):
         """
         Initialize Lightning quantile model.
         
         Args:
-            quantile_alpha: Target quantile level (e.g., 0.7 for 70% quantile)
+            quantile_alphas: List of target quantile levels (e.g., [0.7] for 70% quantile)
             **model_params: Lightning hyperparameters including:
                 - hidden_size: Number of hidden units in first layer (default: 128)
                 - lr: Learning rate (default: 1e-3)
@@ -125,7 +125,13 @@ class LightningQuantileModel(BaseModel):
                 - random_state: Random seed (default: 42)
         """
         super().__init__(**model_params)
-        self.quantile_alpha = quantile_alpha
+        if quantile_alphas is None:
+            quantile_alphas = [0.7]
+        
+        if not quantile_alphas or len(quantile_alphas) != 1:
+            raise ValueError("Lightning quantile model currently supports exactly one quantile level")
+        
+        self.quantile_alpha = quantile_alphas[0]  # Keep internal usage for now
         self.model_type = "lightning_quantile"
         self.lightning_model = None
         self.trainer = None
@@ -316,6 +322,37 @@ class LightningQuantileModel(BaseModel):
     def get_underlying_model(self) -> Any:
         """Get the underlying Lightning quantile model object (for serialization)."""
         return self.lightning_model
+
+    def save_model(self, output_path: str, filename: str) -> None:
+        """
+        Save Lightning quantile model using checkpoint mechanism.
+        
+        Args:
+            output_path: Directory path where to save the model
+            filename: Name of the file (without extension)
+        """
+        if not self.is_trained or self.lightning_model is None:
+            raise ValueError("Model must be trained before saving")
+        
+        from pathlib import Path
+        
+        output_dir = Path(output_path)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save Lightning checkpoint
+        checkpoint_path = output_dir / f"{filename}.ckpt"
+        self.trainer.save_checkpoint(str(checkpoint_path))
+        
+        # Save additional model metadata including quantile info
+        import torch
+        metadata_path = output_dir / f"{filename}_metadata.pt"
+        torch.save({
+            "input_size": self.input_size,
+            "model_params": self.model_params,
+            "quantile_alpha": self.quantile_alpha,
+            "is_trained": self.is_trained,
+            "model_type": self.model_type
+        }, metadata_path)
     
     def save_state(self, path: Path) -> None:
         """

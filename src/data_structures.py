@@ -57,6 +57,42 @@ class DataSplit:
     split_date: Optional[str] = None  # Date where train/validation split occurs
 
 
+@dataclass
+class TrainedModel:
+    """Pure training result without embedded metrics - for single responsibility separation."""
+    model: Any  # The actual trained model object
+    model_type: str
+    modeling_strategy: ModelingStrategy
+    sku_tuples: SkuList
+    hyperparameters: Dict[str, Any]
+    training_config: Dict[str, Any]
+    feature_columns: List[str]
+    target_column: str
+    data_split: DataSplit
+    quantile_level: Optional[float] = None  # For quantile models
+    model_instance: str = "default"
+    
+    def get_basic_metadata(self) -> Dict[str, Any]:
+        """Get basic metadata for model identification (no performance metrics)."""
+        # Extract primary SKU for hierarchical storage
+        primary_sku = self.sku_tuples[0]  
+        product_id, store_id = primary_sku
+        
+        return {
+            'model_type': self.model_type,
+            'modeling_strategy': self.modeling_strategy,
+            'sku_tuples': self.sku_tuples,
+            'store_id': store_id,
+            'product_id': product_id,
+            'hyperparameters': self.hyperparameters,
+            'training_config': self.training_config,
+            'feature_columns': self.feature_columns,
+            'target_column': self.target_column,
+            'quantile_level': self.quantile_level,
+            'model_instance': self.model_instance
+        }
+
+
 @dataclass 
 class BenchmarkModel:
     """Container for a trained model with all its metadata."""
@@ -65,19 +101,8 @@ class BenchmarkModel:
     data_split: DataSplit
     
     def get_identifier(self) -> str:
-        """Generate unique identifier for this model using hierarchical naming."""
-        # Use the model_id from metadata if it exists and is not empty
-        if self.metadata.model_id and self.metadata.model_id.strip():
-            return self.metadata.model_id
-        
-        # Generate hierarchical identifier: strategy_store_product_modeltype_instance
-        strategy = self.metadata.modeling_strategy.value
-        store_id = self.metadata.store_id
-        product_id = self.metadata.product_id
-        model_type = self.metadata.model_type
-        instance = self.metadata.model_instance
-        
-        return f"{strategy}_{store_id}_{product_id}_{model_type}_{instance}"
+        """Return the unique identifier for this model."""
+        return self.metadata.model_id
     
     def get_storage_location(self) -> 'ModelStorageLocation':
         """Get the storage location for this model."""
@@ -91,31 +116,13 @@ class BenchmarkModel:
         )
 
 
-@dataclass
-class ExperimentResults:
-    """Container for complete experiment results before release packaging."""
-    models: List[BenchmarkModel]
-    evaluation_results: Optional[Dict[str, Any]]  # Optional metrics from ModelEvaluator
-    experiment_log: Dict[str, Any]
-    configurations: Dict[str, Any]  # DataConfig, TrainingConfig
-    experiment_name: str
-    timestamp: datetime
 
 
 class ModelRegistry:
-    """Simplified registry for in-memory storage and management of benchmark models.
+    """Registry for in-memory storage and management of benchmark models."""
     
-    Note: Model persistence is now handled by the release management system,
-    not by this registry. This registry only manages in-memory model storage
-    and retrieval.
-    """
-    
-    def __init__(self, storage_path: Optional[Path] = None):
+    def __init__(self):
         self.models: Dict[str, BenchmarkModel] = {}
-        # Note: storage_path kept for compatibility but not used for persistence
-        # Persistence is now handled by release management system
-        self.storage_path = storage_path or Path("benchmark_results")
-        # Removed directory creation - ComprehensiveReleaseManager handles all persistence
     
     def register_model(self, model: BenchmarkModel) -> str:
         """Register a new model in the registry."""
@@ -207,24 +214,3 @@ class ModelTypeConfig:
         return merged
 
 
-@dataclass
-class TrainingConfig:
-    """Simplified configuration for single model type training."""
-    random_state: int = 42
-    
-    # Single model configuration (replaces multi-model complexity)
-    model_config: ModelTypeConfig = field(default_factory=lambda: ModelTypeConfig(model_type="xgboost_standard"))
-    
-    def set_model_config(self, model_type: str, **kwargs) -> 'TrainingConfig':
-        """Set the single model configuration."""
-        config_dict = {'model_type': model_type}
-        config_dict.update(kwargs)
-        
-        
-        self.model_config = ModelTypeConfig(**config_dict)
-        return self
-    
-    @property
-    def model_type(self) -> str:
-        """Get the configured model type."""
-        return self.model_config.model_type

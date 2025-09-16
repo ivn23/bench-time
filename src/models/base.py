@@ -70,6 +70,30 @@ class BaseModel(ABC):
             Dictionary containing model type, parameters, and other metadata
         """
         pass
+
+    def save_model(self, output_path: str, filename: str) -> None:
+        """
+        Save the trained model to the specified path.
+        
+        Args:
+            output_path: Directory path where to save the model
+            filename: Name of the file (without extension, .pkl will be added)
+        
+        Raises:
+            ValueError: If model is not trained
+        """
+        if not self.is_trained:
+            raise ValueError("Model must be trained before saving")
+        
+        import pickle
+        from pathlib import Path
+        
+        output_dir = Path(output_path)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        model_path = output_dir / f"{filename}.pkl"
+        with open(model_path, "wb") as f:
+            pickle.dump(self.model, f)
         
     def is_model_trained(self) -> bool:
         """Check if model has been trained."""

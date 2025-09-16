@@ -271,17 +271,37 @@ class DataLoader:
         # Remove rows with null targets
         df_clean = df_merged.filter(pl.col(self.config.target_column).is_not_null())
         
-        # Get feature columns (exclude metadata columns)
-        exclude_cols = {self.config.bdid_column, self.config.target_column, 
-                       self.config.date_column, "productID", "storeID"}
+        # Get all columns
         if hasattr(df_clean, 'columns'):
             all_cols = set(df_clean.columns)
         else:
             all_cols = set(df_clean.schema.keys())
         
-        feature_cols = sorted(list(all_cols - exclude_cols))
+        # Define comprehensive exclusion patterns
+        base_exclude_cols = {
+            self.config.bdid_column, self.config.target_column, 
+            self.config.date_column, "productID", "storeID",
+            "frequency", "idx", "base_date", "dateID", 
+            "skuID", "companyID", "missing_value", 
+            "not_for_sale", "feature_0038", "target_lag_1"
+        }
         
-        # Prepare X and y with bdID for splitting
+        # Also exclude columns with _right suffix (from joins) that are metadata
+        exclude_cols = base_exclude_cols.copy()
+        for col in all_cols:
+            if col.endswith('_right') and any(base_col in col for base_col in 
+                ['date', 'frequency', 'idx', 'missing_value', 'not_for_sale', 'dateID', 'base_date']):
+                exclude_cols.add(col)
+        
+        # Get feature columns (numeric features only)
+        feature_cols = []
+        for col in sorted(all_cols - exclude_cols):
+            # Only include if it's a numeric feature or explicitly allowed
+            if (col.startswith('feature_') or col.startswith('lag_') or 
+                col in ['lag_target_1'] or col.replace('_right', '') in ['lag_target_1']):
+                feature_cols.append(col)
+        
+        # Prepare X and y with bdID for splitting - date column is only for splitting, not features
         date_col = self.config.date_column if self.config.date_column in df_clean.columns else None
         if date_col:
             X = df_clean.select(["bdID", date_col] + feature_cols)

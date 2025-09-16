@@ -6,13 +6,18 @@ using the M5 competition dataset.
 """
 
 from .data_structures import (
-    ModelingStrategy, SkuTuple, SkuList, ModelMetadata, DataSplit, BenchmarkModel, 
-    ModelRegistry, DataConfig, TrainingConfig, ModelTypeConfig, ExperimentResults, ModelingDataset
+    ModelingStrategy, SkuTuple, SkuList, ModelMetadata, DataSplit, BenchmarkModel, TrainedModel,
+    ModelRegistry, DataConfig, ModelTypeConfig, ModelingDataset
+)
+
+from .experiment_config import (
+    ExperimentConfig, ExperimentResults, create_experiment_config,
+    validate_sku_tuples, validate_modeling_strategy
 )
 
 from .data_loading import DataLoader
 from .model_training import ModelTrainer
-from .evaluation import ModelEvaluator, VisualizationGenerator
+from .evaluation import ModelEvaluator
 from .benchmark_pipeline import BenchmarkPipeline
 from .release_management import ComprehensiveReleaseManager
 
@@ -26,16 +31,19 @@ __all__ = [
     "ModelMetadata", 
     "DataSplit",
     "BenchmarkModel",
+    "TrainedModel",
     "ModelRegistry",
     "DataConfig",
-    "TrainingConfig",
     "ModelTypeConfig",
-    "ExperimentResults",
     "ModelingDataset",
+    "ExperimentConfig",
+    "ExperimentResults",
+    "create_experiment_config",
+    "validate_sku_tuples",
+    "validate_modeling_strategy",
     "DataLoader",
     "ModelTrainer",
     "ModelEvaluator",
-    "VisualizationGenerator",
     "BenchmarkPipeline",
     "ComprehensiveReleaseManager"
 ]

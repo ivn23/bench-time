@@ -1,25 +1,15 @@
 """
 Release Management Module for M5 Benchmarking Framework.
 
-This module provides a release management system that completely replaces
-the ModelRegistry.save_model() functionality with a plugin architecture
-based on BaseReleaseManager interface.
+This module provides a clean release management system where models handle
+their own persistence through the save_model() method.
 
 Key Components:
-- BaseReleaseManager: Abstract interface for model-specific release managers
-- ReleaseManagerFactory: Factory for selecting appropriate release managers
-- Model-specific managers: XGBoostStandardManager, XGBoostQuantileManager, etc.
+- ComprehensiveReleaseManager: Orchestrates complete experiment releases
 """
 
-from .base import BaseReleaseManager
-from .factory import ReleaseManagerFactory
 from .comprehensive_manager import ComprehensiveReleaseManager
 
-# Import managers to trigger registration
-from . import managers
-
 __all__ = [
-    "BaseReleaseManager",
-    "ReleaseManagerFactory",
     "ComprehensiveReleaseManager",
 ]

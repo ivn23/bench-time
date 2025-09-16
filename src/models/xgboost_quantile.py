@@ -5,7 +5,7 @@ This module implements quantile regression using XGBoost with a custom objective
 based on the approach from the quantile_xgboost_simple.ipynb notebook.
 """
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import xgboost as xgb
 
@@ -34,16 +34,22 @@ class XGBoostQuantileModel(BaseModel):
     }
     REQUIRES_QUANTILE = True
     
-    def __init__(self, quantile_alpha: float = 0.7, **model_params):
+    def __init__(self, quantile_alphas: List[float] = None, **model_params):
         """
         Initialize XGBoost quantile model.
         
         Args:
-            quantile_alpha: Target quantile level (e.g., 0.7 for 70% quantile)
+            quantile_alphas: List of target quantile levels (e.g., [0.7] for 70% quantile)
             **model_params: XGBoost hyperparameters
         """
         super().__init__(**model_params)
-        self.quantile_alpha = quantile_alpha
+        if quantile_alphas is None:
+            quantile_alphas = [0.7]
+        
+        if not quantile_alphas or len(quantile_alphas) != 1:
+            raise ValueError("XGBoost quantile model currently supports exactly one quantile level")
+        
+        self.quantile_alpha = quantile_alphas[0]  # Keep internal usage for now
         self.model_type = "xgboost_quantile"
         
         # Set default XGBoost parameters if not provided

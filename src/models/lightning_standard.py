@@ -282,6 +282,36 @@ class LightningStandardModel(BaseModel):
     def get_underlying_model(self) -> Any:
         """Get the underlying Lightning model object (for serialization)."""
         return self.lightning_model
+
+    def save_model(self, output_path: str, filename: str) -> None:
+        """
+        Save Lightning model using checkpoint mechanism.
+        
+        Args:
+            output_path: Directory path where to save the model
+            filename: Name of the file (without extension)
+        """
+        if not self.is_trained or self.lightning_model is None:
+            raise ValueError("Model must be trained before saving")
+        
+        from pathlib import Path
+        
+        output_dir = Path(output_path)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save Lightning checkpoint
+        checkpoint_path = output_dir / f"{filename}.ckpt"
+        self.trainer.save_checkpoint(str(checkpoint_path))
+        
+        # Save additional model metadata
+        import torch
+        metadata_path = output_dir / f"{filename}_metadata.pt"
+        torch.save({
+            "input_size": self.input_size,
+            "model_params": self.model_params,
+            "is_trained": self.is_trained,
+            "model_type": self.model_type
+        }, metadata_path)
     
     def save_state(self, path: Path) -> None:
         """
