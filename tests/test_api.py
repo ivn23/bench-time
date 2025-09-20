@@ -1,13 +1,15 @@
 """
-Tests for public API and imports.
+Tests for API and imports.
 Ensures all public components can be imported and instantiated correctly.
 """
 
 import pytest
+import numpy as np
+import polars as pl
 
 
-class TestPublicAPIImports:
-    """Test that all public API components can be imported."""
+class TestAPIImports:
+    """Test that all API components can be imported."""
 
     def test_import_modeling_strategy(self):
         """Test importing ModelingStrategy enum."""
@@ -29,66 +31,80 @@ class TestPublicAPIImports:
 
     def test_import_data_structures(self):
         """Test importing data structure classes."""
-        from src import ModelMetadata, DataSplit, BenchmarkModel, ModelRegistry, ModelingDataset
-        
-        assert ModelMetadata is not None
-        assert DataSplit is not None
-        assert BenchmarkModel is not None
-        assert ModelRegistry is not None
-        assert ModelingDataset is not None
-        
-        # Check they're actually classes
-        assert callable(ModelMetadata)
-        assert callable(DataSplit)
-        assert callable(BenchmarkModel)
-        assert callable(ModelRegistry)
-        assert callable(ModelingDataset)
-
-    def test_import_config_classes(self):
-        """Test importing configuration classes."""
-        from src import DataConfig, TrainingConfig
+        from src import (
+            DataConfig, ModelingDataset, ModelConfig, 
+            SplitInfo, TrainingResult, ExperimentResults
+        )
         
         assert DataConfig is not None
-        assert TrainingConfig is not None
+        assert ModelingDataset is not None
+        assert ModelConfig is not None
+        assert SplitInfo is not None
+        assert TrainingResult is not None
+        assert ExperimentResults is not None
+        
+        # Check they're actually classes
         assert callable(DataConfig)
-        assert callable(TrainingConfig)
+        assert callable(ModelingDataset)
+        assert callable(ModelConfig)
+        assert callable(SplitInfo)
+        assert callable(TrainingResult)
+        assert callable(ExperimentResults)
+
+    def test_import_factory_functions(self):
+        """Test importing factory and validation functions."""
+        from src import create_config, validate_sku_tuples, validate_modeling_strategy
+        
+        assert create_config is not None
+        assert validate_sku_tuples is not None
+        assert validate_modeling_strategy is not None
+        assert callable(create_config)
+        assert callable(validate_sku_tuples)
+        assert callable(validate_modeling_strategy)
 
     def test_import_core_components(self):
         """Test importing core framework components."""
-        from src import DataLoader, ModelTrainer, ModelEvaluator, VisualizationGenerator
+        from src import DataLoader, ModelTrainer, ModelEvaluator
         
         assert DataLoader is not None
         assert ModelTrainer is not None
         assert ModelEvaluator is not None
-        assert VisualizationGenerator is not None
         
         assert callable(DataLoader)
         assert callable(ModelTrainer)
         assert callable(ModelEvaluator)
-        assert callable(VisualizationGenerator)
 
     def test_import_main_pipeline(self):
-        """Test importing main pipeline class."""
+        """Test importing pipeline class."""
         from src import BenchmarkPipeline
         
         assert BenchmarkPipeline is not None
         assert callable(BenchmarkPipeline)
 
+    def test_import_release_management(self):
+        """Test importing release management."""
+        from src import ReleaseManager
+        
+        assert ReleaseManager is not None
+        assert callable(ReleaseManager)
+
     def test_import_all_at_once(self):
-        """Test importing all public components at once."""
+        """Test importing all components at once."""
         from src import (
-            ModelingStrategy, SkuTuple, SkuList, ModelMetadata, DataSplit, 
-            BenchmarkModel, ModelRegistry, DataConfig, TrainingConfig, ModelingDataset,
-            DataLoader, ModelTrainer, ModelEvaluator, VisualizationGenerator,
-            BenchmarkPipeline
+            ModelingStrategy, SkuTuple, SkuList, DataConfig, ModelingDataset,
+            ModelConfig, SplitInfo, TrainingResult, ExperimentResults,
+            create_config, validate_sku_tuples, validate_modeling_strategy,
+            DataLoader, ModelTrainer, ModelEvaluator, BenchmarkPipeline,
+            ReleaseManager
         )
         
         # All should be importable without error
         components = [
-            ModelingStrategy, SkuTuple, SkuList, ModelMetadata, DataSplit,
-            BenchmarkModel, ModelRegistry, DataConfig, TrainingConfig, ModelingDataset,
-            DataLoader, ModelTrainer, ModelEvaluator, VisualizationGenerator,
-            BenchmarkPipeline
+            ModelingStrategy, SkuTuple, SkuList, DataConfig, ModelingDataset,
+            ModelConfig, SplitInfo, TrainingResult, ExperimentResults,
+            create_config, validate_sku_tuples, validate_modeling_strategy,
+            DataLoader, ModelTrainer, ModelEvaluator, BenchmarkPipeline,
+            ReleaseManager
         ]
         
         for component in components:
@@ -104,10 +120,11 @@ class TestPublicAPIImports:
         
         # Check __all__ contains expected exports
         expected_exports = [
-            'ModelingStrategy', 'SkuTuple', 'SkuList', 'ModelMetadata', 
-            'DataSplit', 'BenchmarkModel', 'ModelRegistry', 'DataConfig', 
-            'TrainingConfig', 'ModelingDataset', 'DataLoader', 'ModelTrainer', 'ModelEvaluator',
-            'VisualizationGenerator', 'BenchmarkPipeline'
+            'ModelingStrategy', 'SkuTuple', 'SkuList', 'DataConfig', 'ModelingDataset',
+            'ModelConfig', 'SplitInfo', 'TrainingResult', 'ExperimentResults',
+            'create_config', 'validate_sku_tuples', 'validate_modeling_strategy',
+            'DataLoader', 'ModelTrainer', 'ModelEvaluator', 'BenchmarkPipeline',
+            'ReleaseManager'
         ]
         
         for export in expected_exports:
@@ -115,7 +132,7 @@ class TestPublicAPIImports:
 
 
 class TestBasicInstantiation:
-    """Test basic instantiation of main classes."""
+    """Test basic instantiation of classes."""
 
     def test_modeling_strategy_usage(self):
         """Test ModelingStrategy can be used correctly."""
@@ -128,9 +145,9 @@ class TestBasicInstantiation:
         assert individual.value == "individual"
         assert combined != individual
 
-    def test_config_instantiation(self):
-        """Test configuration classes can be instantiated."""
-        from src import DataConfig, TrainingConfig
+    def test_data_config_instantiation(self):
+        """Test DataConfig can be instantiated with required parameters."""
+        from src import DataConfig
         
         # Test DataConfig with minimal required parameters
         data_config = DataConfig(
@@ -139,75 +156,79 @@ class TestBasicInstantiation:
             mapping_path="/path/to/mapping.pkl"
         )
         assert data_config.features_path == "/path/to/features.feather"
-        
-        # Test TrainingConfig with defaults
-        training_config = TrainingConfig()
-        assert training_config.model_type == "xgboost"
-        assert training_config.random_state == 42
+        assert data_config.target_path == "/path/to/target.feather"
+        assert data_config.mapping_path == "/path/to/mapping.pkl"
+        assert data_config.date_column == "date"
+        assert data_config.target_column == "target"
+        assert data_config.bdid_column == "bdID"
 
-    def test_model_registry_instantiation(self):
-        """Test ModelRegistry can be instantiated."""
-        from src import ModelRegistry
+    def test_model_config_factory(self):
+        """Test ModelConfig can be created via factory."""
+        from src import create_config
         
-        # Should work with default path
-        registry = ModelRegistry()
-        assert registry is not None
-        assert hasattr(registry, 'storage_path')
-        assert hasattr(registry, 'register_model')
-        assert hasattr(registry, 'get_model')
-        assert hasattr(registry, 'list_models')
-
-    def test_data_structures_instantiation(self):
-        """Test data structure classes can be instantiated."""
-        from src import ModelMetadata, DataSplit, ModelingStrategy
-        import numpy as np
+        # Test basic config creation
+        config = create_config("xgboost_standard", {"n_estimators": 100})
+        assert config.model_type == "xgboost_standard"
+        assert config.hyperparameters["n_estimators"] == 100
+        assert config.quantile_alphas is None
+        assert not config.is_quantile_model
         
-        # Test ModelMetadata
-        metadata = ModelMetadata(
-            model_id="test_id",
-            modeling_strategy=ModelingStrategy.COMBINED,
-            sku_tuples=[(80558, 2)],
-            model_type="xgboost",
-            hyperparameters={},
-            training_config={},
-            performance_metrics={},
-            feature_columns=[],
-            target_column="target"
+        # Test quantile config creation
+        quantile_config = create_config(
+            "xgboost_quantile", 
+            {"n_estimators": 50}, 
+            quantile_alphas=[0.1, 0.5, 0.9]
         )
-        assert metadata.model_id == "test_id"
+        assert quantile_config.is_quantile_model
+        assert quantile_config.quantile_alphas == [0.1, 0.5, 0.9]
+
+    def test_split_info_instantiation(self):
+        """Test SplitInfo can be instantiated."""
+        from src import SplitInfo
         
-        # Test DataSplit
-        data_split = DataSplit(
+        split_info = SplitInfo(
             train_bdIDs=np.array([1, 2, 3]),
-            validation_bdIDs=np.array([4, 5])
+            validation_bdIDs=np.array([4, 5]),
+            split_date="2023-01-01"
         )
-        assert len(data_split.train_bdIDs) == 3
+        assert len(split_info.train_bdIDs) == 3
+        assert len(split_info.validation_bdIDs) == 2
+        assert split_info.split_date == "2023-01-01"
 
-    def test_component_instantiation_with_configs(self, temp_output_dir):
+    def test_validation_functions(self):
+        """Test validation functions work correctly."""
+        from src import validate_sku_tuples, validate_modeling_strategy, ModelingStrategy
+        
+        # Test SKU tuple validation
+        valid_skus = [(80558, 2), (80651, 3)]
+        validate_sku_tuples(valid_skus)  # Should not raise
+        
+        # Test modeling strategy validation
+        validate_modeling_strategy(ModelingStrategy.COMBINED, valid_skus)  # Should not raise
+        validate_modeling_strategy(ModelingStrategy.INDIVIDUAL, valid_skus)  # Should not raise
+
+    def test_component_instantiation_with_configs(self):
         """Test core components can be instantiated with configs."""
-        from src import DataLoader, ModelTrainer, BenchmarkPipeline, DataConfig, TrainingConfig
+        from src import DataLoader, ModelTrainer, DataConfig, create_config
         
         # Create test configs
         data_config = DataConfig(
-            features_path=str(temp_output_dir / "features.feather"),
-            target_path=str(temp_output_dir / "target.feather"),
-            mapping_path=str(temp_output_dir / "mapping.pkl")
+            features_path="/fake/features.feather",
+            target_path="/fake/target.feather",
+            mapping_path="/fake/mapping.pkl"
         )
         
-        training_config = TrainingConfig()
+        model_config = create_config("xgboost_standard", {"n_estimators": 10})
         
         # Test instantiation (don't try to use them, just create them)
         data_loader = DataLoader(data_config)
         assert data_loader is not None
         assert hasattr(data_loader, 'load_data')
+        assert hasattr(data_loader, 'prepare_modeling_dataset')
         
-        model_trainer = ModelTrainer(training_config)
+        model_trainer = ModelTrainer(model_config)
         assert model_trainer is not None
         assert hasattr(model_trainer, 'train_model')
-        
-        pipeline = BenchmarkPipeline(data_config, training_config, temp_output_dir)
-        assert pipeline is not None
-        assert hasattr(pipeline, 'run_experiment')
 
 
 class TestAPIConsistency:
@@ -224,24 +245,13 @@ class TestAPIConsistency:
 
     def test_main_classes_have_expected_methods(self):
         """Test main classes have expected public methods."""
-        from src import BenchmarkPipeline, ModelRegistry, DataLoader, ModelTrainer
+        from src import BenchmarkPipeline, DataLoader, ModelTrainer, ModelEvaluator
         
         # BenchmarkPipeline expected methods
-        expected_pipeline_methods = [
-            'load_and_prepare_data', 'run_experiment', 'run_complete_experiment', 
-            'evaluate_all_models', 'evaluate_models'
-        ]
+        expected_pipeline_methods = ['run_experiment']
         
         for method in expected_pipeline_methods:
             assert hasattr(BenchmarkPipeline, method)
-        
-        # ModelRegistry expected methods
-        expected_registry_methods = [
-            'register_model', 'get_model', 'list_models', 'save_model', 'load_model'
-        ]
-        
-        for method in expected_registry_methods:
-            assert hasattr(ModelRegistry, method)
         
         # DataLoader expected methods
         expected_loader_methods = [
@@ -257,10 +267,16 @@ class TestAPIConsistency:
         
         for method in expected_trainer_methods:
             assert hasattr(ModelTrainer, method)
+        
+        # ModelEvaluator expected methods
+        expected_evaluator_methods = ['evaluate_training_result', 'evaluate_multiple_results']
+        
+        for method in expected_evaluator_methods:
+            assert hasattr(ModelEvaluator, method)
 
     def test_config_classes_have_expected_attributes(self):
         """Test configuration classes have expected attributes."""
-        from src import DataConfig, TrainingConfig
+        from src import DataConfig, create_config
         
         # DataConfig expected attributes
         data_config = DataConfig(
@@ -269,44 +285,47 @@ class TestAPIConsistency:
         
         expected_data_attrs = [
             'features_path', 'target_path', 'mapping_path', 'date_column',
-            'target_column', 'bdid_column', 'remove_not_for_sale'
+            'target_column', 'bdid_column', 'validation_split'
         ]
         
         for attr in expected_data_attrs:
             assert hasattr(data_config, attr)
         
-        # TrainingConfig expected attributes
-        training_config = TrainingConfig()
+        # ModelConfig expected attributes
+        model_config = create_config("xgboost_standard", {})
         
-        expected_training_attrs = [
-            'random_state', 'model_config', 'model_type'
+        expected_model_attrs = [
+            'model_type', 'hyperparameters', 'quantile_alphas', 'random_state'
         ]
         
-        for attr in expected_training_attrs:
-            assert hasattr(training_config, attr)
+        for attr in expected_model_attrs:
+            assert hasattr(model_config, attr)
 
     def test_dataclass_structure_consistency(self):
         """Test dataclass structures are consistent."""
-        from src import ModelMetadata, DataSplit, BenchmarkModel, DataConfig, TrainingConfig
+        from src import (
+            DataConfig, ModelingDataset, ModelConfig, 
+            SplitInfo, TrainingResult, ExperimentResults
+        )
         import dataclasses
         
         # Check they are actually dataclasses
-        assert dataclasses.is_dataclass(ModelMetadata)
-        assert dataclasses.is_dataclass(DataSplit)
-        assert dataclasses.is_dataclass(BenchmarkModel)
         assert dataclasses.is_dataclass(DataConfig)
-        assert dataclasses.is_dataclass(TrainingConfig)
+        assert dataclasses.is_dataclass(ModelingDataset)
+        assert dataclasses.is_dataclass(ModelConfig)
+        assert dataclasses.is_dataclass(SplitInfo)
+        assert dataclasses.is_dataclass(TrainingResult)
+        assert dataclasses.is_dataclass(ExperimentResults)
         
         # Check expected fields exist
-        metadata_fields = [f.name for f in dataclasses.fields(ModelMetadata)]
-        expected_metadata_fields = [
-            'model_id', 'modeling_strategy', 'sku_tuples', 'model_type',
-            'hyperparameters', 'training_config', 'performance_metrics',
-            'feature_columns', 'target_column'
+        data_config_fields = [f.name for f in dataclasses.fields(DataConfig)]
+        expected_data_config_fields = [
+            'features_path', 'target_path', 'mapping_path', 'date_column',
+            'target_column', 'bdid_column', 'validation_split'
         ]
         
-        for field in expected_metadata_fields:
-            assert field in metadata_fields
+        for field in expected_data_config_fields:
+            assert field in data_config_fields
 
 
 class TestErrorHandling:
@@ -314,7 +333,7 @@ class TestErrorHandling:
 
     def test_invalid_config_creation(self):
         """Test error handling for invalid configurations."""
-        from src import DataConfig, TrainingConfig
+        from src import DataConfig
         
         # DataConfig requires certain parameters
         with pytest.raises(TypeError):
@@ -327,6 +346,20 @@ class TestErrorHandling:
             mapping_path="test"
         )
         assert data_config is not None
+
+    def test_invalid_sku_validation(self):
+        """Test SKU validation with invalid inputs."""
+        from src import validate_sku_tuples
+        
+        # Invalid SKU formats should raise ValueError
+        with pytest.raises(ValueError):
+            validate_sku_tuples([])  # Empty list
+        
+        with pytest.raises(ValueError):
+            validate_sku_tuples([(1, 2, 3)])  # Too many elements
+        
+        with pytest.raises(ValueError):
+            validate_sku_tuples([(1,)])  # Too few elements
 
     def test_invalid_enum_usage(self):
         """Test ModelingStrategy enum usage."""
@@ -341,11 +374,13 @@ class TestErrorHandling:
         assert strategy.value == "combined"  # But value should match
 
     def test_import_errors(self):
-        """Test that non-existent imports fail appropriately."""
-        # Test importing something that doesn't exist
+        """Test that legacy imports fail appropriately."""
+        # Test importing legacy classes that should no longer exist
         with pytest.raises(ImportError):
-            from src import NonExistentClass
+            from src import BenchmarkModel
         
-        # Test importing from wrong module
         with pytest.raises(ImportError):
-            from src.nonexistent_module import SomeClass
+            from src import TrainingConfig
+        
+        with pytest.raises(ImportError):
+            from src import ModelRegistry

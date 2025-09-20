@@ -138,7 +138,7 @@ class LightningQuantileModel(BaseModel):
         self.input_size = None
         
         # Validate quantile_alpha
-        if not 0 < quantile_alpha < 1:
+        if not 0 < self.quantile_alpha < 1:
             raise ValueError("quantile_alpha must be between 0 and 1")
         
         # Set random seeds for reproducibility
@@ -192,22 +192,40 @@ class LightningQuantileModel(BaseModel):
             persistent_workers=False  # Safer default
         )
         
-    def train(self, X_train: np.ndarray, y_train: np.ndarray,
-              X_val: Optional[np.ndarray] = None, y_val: Optional[np.ndarray] = None,
-              **training_kwargs) -> None:
+    def train(self, X_train: np.ndarray, y_train: np.ndarray, **training_kwargs) -> None:
         """
-        Train the Lightning quantile model.
+        Train the Lightning quantile model with internal train/validation split.
         
         Args:
             X_train: Training features
             y_train: Training targets
-            X_val: Validation features (optional)
-            y_val: Validation targets (optional)
             **training_kwargs: Additional training parameters
+        
+        Note:
+            This method creates an internal train/validation split from the provided
+            training data to prevent data leakage. Test data is never used during training.
         """
         try:
+            from sklearn.model_selection import train_test_split
+            
             # Store input size for model architecture
             self.input_size = X_train.shape[1]
+            
+            # Create internal train/validation split to prevent data leakage
+            validation_split = training_kwargs.get('validation_split', 0.2)
+            random_state = self.model_params.get('random_state', 42)
+            
+            if len(X_train) > 10:  # Only split if we have enough data
+                X_train_split, X_val_split, y_train_split, y_val_split = train_test_split(
+                    X_train, y_train, 
+                    test_size=validation_split, 
+                    random_state=random_state,
+                    shuffle=False  # Preserve temporal order for time series
+                )
+            else:
+                # Use all data for training if dataset is too small
+                X_train_split, y_train_split = X_train, y_train
+                X_val_split, y_val_split = None, None
             
             # Create Lightning quantile model
             self.lightning_model = QuantileForecastingModel(
@@ -218,11 +236,11 @@ class LightningQuantileModel(BaseModel):
                 dropout=self.model_params.get("dropout", 0.2)
             )
             
-            # Create data loaders
-            train_loader = self._create_data_loader(X_train, y_train, shuffle=True)
+            # Create data loaders using internal split
+            train_loader = self._create_data_loader(X_train_split, y_train_split, shuffle=True)
             val_loader = None
-            if X_val is not None and y_val is not None:
-                val_loader = self._create_data_loader(X_val, y_val, shuffle=False)
+            if X_val_split is not None and y_val_split is not None:
+                val_loader = self._create_data_loader(X_val_split, y_val_split, shuffle=False)
             
             # Configure trainer
             max_epochs = self.model_params.get("max_epochs", 50)
@@ -241,14 +259,17 @@ class LightningQuantileModel(BaseModel):
             
             self.trainer = L.Trainer(**trainer_kwargs)
             
-            # Train the model
+            # Train the model using internal validation split
             self.trainer.fit(self.lightning_model, train_loader, val_loader)
             
             # Set training flag
             self.is_trained = True
             self.model = self.lightning_model  # Store reference for consistency
             
-            logger.info(f"Lightning quantile model training completed after {max_epochs} epochs")
+            if val_loader is not None:
+                logger.info(f"Lightning quantile model training completed after {max_epochs} epochs with internal validation split")
+            else:
+                logger.info(f"Lightning quantile model training completed after {max_epochs} epochs (no validation - dataset too small)")
             
         except Exception as e:
             raise ModelTrainingError(f"Failed to train Lightning quantile model: {str(e)}")

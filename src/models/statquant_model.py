@@ -30,12 +30,6 @@ class StatQuantModel(BaseModel):
     
     MODEL_TYPE = "statquant"
     DESCRIPTION = "Statsmodels Quantile Regression for probabilistic forecasting"
-    DEFAULT_HYPERPARAMETERS = {
-        "method": "interior-point",
-        "max_iter": 1000,
-        "p_tol": 1e-6,
-        "random_state": 42
-    }
     REQUIRES_QUANTILE = True
     
     def __init__(self, quantile_alphas: List[float] = None, **model_params):
@@ -74,67 +68,57 @@ class StatQuantModel(BaseModel):
             if key not in self.model_params:
                 self.model_params[key] = value
     
-    def train(self, X_train: np.ndarray, y_train: np.ndarray,
-              X_val: Optional[np.ndarray] = None, y_val: Optional[np.ndarray] = None,
-              **training_kwargs) -> None:
+    def train(self, X_train: np.ndarray, y_train: np.ndarray, **training_kwargs) -> None:
         """
         Train the StatQuant model using statsmodels QuantReg.
         
         Args:
             X_train: Training features
             y_train: Training targets
-            X_val: Validation features (optional, not used by statsmodels)
-            y_val: Validation targets (optional, not used by statsmodels)
             **training_kwargs: Additional training parameters
         """
-        try:
-            # Flatten y_train if needed
-            if len(y_train.shape) > 1:
-                y_train = y_train.ravel()
+
+        # Flatten y_train if needed
+        if len(y_train.shape) > 1:
+            y_train = y_train.ravel()
+        
+        # Data cleaning for statsmodels compatibility
+        # Check for and handle inf/nan values
+        X_clean = X_train.copy()
+        y_clean = y_train.copy()
+        
+        # Replace inf values with finite values
+        X_clean = np.where(np.isinf(X_clean), np.nan, X_clean)
+        
+        # Handle NaN/Inf values by removing rows with any missing data
+        # This is necessary because statsmodels QuantReg is strict about data quality
+        if np.isnan(X_clean).any() or np.isnan(y_clean).any():
+            # Find rows with any NaN values
+            valid_mask = ~(np.isnan(X_clean).any(axis=1) | np.isnan(y_clean))
+            X_clean = X_clean[valid_mask]
+            y_clean = y_clean[valid_mask]
             
-            # Data cleaning for statsmodels compatibility
-            # Check for and handle inf/nan values
-            X_clean = X_train.copy()
-            y_clean = y_train.copy()
+            logger.info(f"Removed {np.sum(~valid_mask)} rows with missing values for StatQuant training")
+        
+        # Ensure we still have enough data after cleaning
+        if len(X_clean) < 10:  # Minimum sample size check
+            raise ValueError("Insufficient clean data for StatQuant training (< 10 samples after cleaning)")
+        
+        # Create QuantReg model - note that QuantReg expects (endog, exog)
+        self.model = QuantReg(endog=y_clean, exog=X_clean)
+        
+        # Fit the model with specified quantile
+        fit_params = {
+            'q': self.quantile_alpha,
+            **self.model_params,
+            **training_kwargs
+        }
+
+        self.fitted_model = self.model.fit(**fit_params)
+        
+        self.is_trained = True
             
-            # Replace inf values with finite values
-            X_clean = np.where(np.isinf(X_clean), np.nan, X_clean)
-            
-            # Handle NaN/Inf values by removing rows with any missing data
-            # This is necessary because statsmodels QuantReg is strict about data quality
-            if np.isnan(X_clean).any() or np.isnan(y_clean).any():
-                # Find rows with any NaN values
-                valid_mask = ~(np.isnan(X_clean).any(axis=1) | np.isnan(y_clean))
-                X_clean = X_clean[valid_mask]
-                y_clean = y_clean[valid_mask]
-                
-                logger.info(f"Removed {np.sum(~valid_mask)} rows with missing values for StatQuant training")
-            
-            # Ensure we still have enough data after cleaning
-            if len(X_clean) < 10:  # Minimum sample size check
-                raise ValueError("Insufficient clean data for StatQuant training (< 10 samples after cleaning)")
-            
-            # Create QuantReg model - note that QuantReg expects (endog, exog)
-            self.model = QuantReg(endog=y_clean, exog=X_clean)
-            
-            # Fit the model with specified quantile
-            fit_params = {
-                'q': self.quantile_alpha,
-                **self.model_params,
-                **training_kwargs
-            }
-            
-            # Suppress iteration warnings if requested
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", category=UserWarning, 
-                                      message="Maximum number of iterations")
-                
-                self.fitted_model = self.model.fit(**fit_params)
-            
-            self.is_trained = True
-            
-        except Exception as e:
-            raise ModelTrainingError(f"Failed to train StatQuant model: {str(e)}")
+
     
     def predict(self, X: np.ndarray) -> np.ndarray:
         """
@@ -152,10 +136,7 @@ class StatQuantModel(BaseModel):
         if not self.is_trained or self.fitted_model is None:
             raise ModelPredictionError("Model must be trained before making predictions")
         
-        try:
-            return self.fitted_model.predict(X)
-        except Exception as e:
-            raise ModelPredictionError(f"Failed to make predictions: {str(e)}")
+        return self.fitted_model.predict(X)
     
     def get_model_info(self) -> Dict[str, Any]:
         """
