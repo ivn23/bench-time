@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Tuple
 import numpy as np
 import xgboost as xgb
 
-from .base import BaseModel, ModelTrainingError, ModelPredictionError
+from .base import BaseModel, ModelPredictionError
 
 
 class XGBoostQuantileModel(BaseModel):

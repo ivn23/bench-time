@@ -1,16 +1,17 @@
 """
 Data loading and preprocessing module.
 Memory-efficient data loading using Polars with filtering capabilities.
+Centralized data preparation for all model training and evaluation needs.
 """
 
 import polars as pl
 import numpy as np
 import pickle
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Union
 from pathlib import Path
 import logging
 
-from .structures import DataConfig, ModelingStrategy, ModelingDataset, SkuList
+from .structures import DataConfig, ModelingStrategy, ModelingDataset, SkuList, TrainingResult
 
 logger = logging.getLogger(__name__)
 
@@ -49,28 +50,11 @@ class DataLoader:
             self._features_df = pl.read_ipc(self.config.features_path)
             self._target_df = pl.read_ipc(self.config.target_path)
         
-        # Apply basic filters
-        if self.config.remove_not_for_sale:
-            self._features_df = self._features_df.filter(pl.col("not_for_sale") != 1)
-        
-        if self.config.min_date:
-            self._features_df = self._features_df.filter(
-                pl.col(self.config.date_column) >= self.config.min_date
-            )
-            self._target_df = self._target_df.filter(
-                pl.col(self.config.date_column) >= self.config.min_date
-            )
-        
-        if self.config.max_date:
-            self._features_df = self._features_df.filter(
-                pl.col(self.config.date_column) <= self.config.max_date
-            )
-            self._target_df = self._target_df.filter(
-                pl.col(self.config.date_column) <= self.config.max_date
-            )
+
         
         self._is_loaded = True
         logger.info("Data loading completed")
+
         
         return self._features_df, self._target_df, self._feature_mapping
     
@@ -182,11 +166,12 @@ class DataLoader:
             self.load_data(lazy=False)
         
         # Filter data for specified SKUs
+        print("features_df after loading",self._features_df.shape)
         features_df, target_df = self._filter_sku_data(sku_tuples, modeling_strategy)
-        
+        print("features_df after sku_filter",self._features_df.shape)
         # Prepare features for modeling
         X, y, feature_cols = self._prepare_features(features_df, target_df)
-        
+        print("features_df after feature preparation",X.shape)
         # Apply temporal splitting with configuration
         X_train, y_train, X_test, y_test, split_info = self._apply_temporal_split(X, y)
         
@@ -288,19 +273,7 @@ class DataLoader:
         }
         
         # Also exclude columns with _right suffix (from joins) that are metadata
-        exclude_cols = base_exclude_cols.copy()
-        for col in all_cols:
-            if col.endswith('_right') and any(base_col in col for base_col in 
-                ['date', 'frequency', 'idx', 'missing_value', 'not_for_sale', 'dateID', 'base_date']):
-                exclude_cols.add(col)
-        
-        # Get feature columns (numeric features only)
-        feature_cols = []
-        for col in sorted(all_cols - exclude_cols):
-            # Only include if it's a numeric feature or explicitly allowed
-            if (col.startswith('feature_') or col.startswith('lag_') or 
-                col in ['lag_target_1'] or col.replace('_right', '') in ['lag_target_1']):
-                feature_cols.append(col)
+        feature_cols = self.get_feature_columns(df_clean)
         
         # Prepare X and y with bdID for splitting - date column is only for splitting, not features
         date_col = self.config.date_column if self.config.date_column in df_clean.columns else None
@@ -335,3 +308,117 @@ class DataLoader:
         }
         
         return X_train, y_train, X_test, y_test, split_info
+    
+    # ===================================================================
+    # CENTRALIZED DATA PREPARATION METHODS
+    # All data format conversion and preparation logic consolidated here
+    # ===================================================================
+    
+    @staticmethod
+    def prepare_training_data(dataset: ModelingDataset, model_type: str) -> Tuple[Any, Any]:
+        """
+        Prepare training data in model-specific format.
+        
+        Args:
+            dataset: ModelingDataset containing training data
+            model_type: Model type determining format (xgboost needs pandas, others numpy)
+            
+        Returns:
+            Tuple of (X_train, y_train) in appropriate format
+        """
+        if "xgboost" in model_type.lower():
+            # XGBoost models need pandas DataFrames for feature names
+            X_train = dataset.X_train.select(dataset.feature_cols).to_pandas()
+            y_train = dataset.y_train.select(dataset.target_col).to_pandas()[dataset.target_col]
+        else:
+            # All other models use numpy arrays
+            X_train = dataset.X_train.select(dataset.feature_cols).to_numpy()
+            y_train = dataset.y_train.select(dataset.target_col).to_numpy().flatten()
+        
+        logger.debug(f"Prepared training data for {model_type}: X shape {X_train.shape}, y shape {y_train.shape}")
+        return X_train, y_train
+    
+    @staticmethod
+    def prepare_test_data(dataset: ModelingDataset, model_type: str) -> Tuple[Any, Any]:
+        """
+        Prepare test data in model-specific format.
+        
+        Args:
+            dataset: ModelingDataset containing test data
+            model_type: Model type determining format (xgboost needs pandas, others numpy)
+            
+        Returns:
+            Tuple of (X_test, y_test) in appropriate format
+        """
+        if "xgboost" in model_type.lower():
+            # XGBoost models need pandas DataFrames for feature names
+            X_test = dataset.X_test.select(dataset.feature_cols).to_pandas()
+            y_test = dataset.y_test.select(dataset.target_col).to_pandas()[dataset.target_col]
+        else:
+            # All other models use numpy arrays
+            X_test = dataset.X_test.select(dataset.feature_cols).to_numpy()
+            y_test = dataset.y_test.select(dataset.target_col).to_numpy().flatten()
+        
+        logger.debug(f"Prepared test data for {model_type}: X shape {X_test.shape}, y shape {y_test.shape}")
+        return X_test, y_test
+    
+    @staticmethod
+    def prepare_evaluation_data(X_test: pl.DataFrame, y_test: pl.DataFrame, 
+                              training_result: TrainingResult) -> Tuple[Any, Any]:
+        """
+        Filter and format test data for model evaluation.
+        
+        Args:
+            X_test: Test features DataFrame
+            y_test: Test targets DataFrame
+            training_result: TrainingResult containing model info and split details
+            
+        Returns:
+            Tuple of (X_test_filtered, y_test_filtered) in model-appropriate format
+        """
+        # Use test bdIDs from training result split info
+        bdids_to_use = training_result.split_info.test_bdIDs
+        
+        # Filter test data to match the bdIDs used during training
+        test_features = X_test.filter(pl.col("bdID").is_in(bdids_to_use))
+        test_targets = y_test.filter(pl.col("bdID").is_in(bdids_to_use))
+        
+        # Convert to model-specific format
+        model_type = training_result.model_type
+        if "xgboost" in model_type.lower():
+            X_test_filtered = test_features.select(training_result.feature_columns).to_pandas()
+        else:
+            X_test_filtered = test_features.select(training_result.feature_columns).to_numpy()
+        
+        y_test_filtered = test_targets.select(training_result.target_column).to_numpy().flatten()
+        
+        logger.debug(f"Prepared evaluation data for {model_type}: {len(X_test_filtered)} samples")
+        return X_test_filtered, y_test_filtered
+    
+    @staticmethod
+    def convert_to_model_format(X: pl.DataFrame, y: pl.DataFrame, 
+                              feature_cols: List[str], target_col: str, 
+                              model_type: str) -> Tuple[Any, Any]:
+        """
+        Convert polars DataFrames to model-specific format.
+        
+        Args:
+            X: Features DataFrame
+            y: Targets DataFrame  
+            feature_cols: List of feature column names
+            target_col: Target column name
+            model_type: Model type determining output format
+            
+        Returns:
+            Tuple of (X_converted, y_converted) in appropriate format
+        """
+        if "xgboost" in model_type.lower():
+            # XGBoost models need pandas DataFrames
+            X_converted = X.select(feature_cols).to_pandas()
+            y_converted = y.select(target_col).to_pandas()[target_col]
+        else:
+            # All other models use numpy arrays
+            X_converted = X.select(feature_cols).to_numpy()
+            y_converted = y.select(target_col).to_numpy().flatten()
+        
+        return X_converted, y_converted

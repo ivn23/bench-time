@@ -10,6 +10,7 @@ from typing import Dict, Any, List, Tuple, Optional
 import logging
 
 from .model_types import model_registry
+from .data_loading import DataLoader
 from .structures import (
     TrainingResult, SplitInfo, ModelingStrategy, SkuList,
     ModelConfig, ModelingDataset
@@ -81,11 +82,8 @@ class ModelTrainer:
         Returns TrainingResult with training results and basic metadata.
         """
         
-        # Convert to numpy arrays for training
-        X_train_np = dataset.X_train.select(dataset.feature_cols).to_numpy()
-        y_train_np = dataset.y_train.select(dataset.target_col).to_numpy().flatten()
-        X_test_np = dataset.X_test.select(dataset.feature_cols).to_numpy()
-        y_test_np = dataset.y_test.select(dataset.target_col).to_numpy().flatten()
+        # Use DataLoader for centralized data preparation
+        X_train_prepared, y_train_prepared = DataLoader.prepare_training_data(dataset, model_type)
         
         # Get the single model configuration
         hyperparameters = self.model_config.merge_with_defaults()
@@ -101,7 +99,7 @@ class ModelTrainer:
         
         # Train model with fixed hyperparameters using model factory
         final_model = self._train_model_with_params(
-            X_train_np, y_train_np, hyperparameters, model_type, quantile_alpha=quantile_alpha
+            X_train_prepared, y_train_prepared, hyperparameters, model_type, quantile_alpha=quantile_alpha
         )
         
         # Get training loss if available
@@ -132,7 +130,7 @@ class ModelTrainer:
         
         return training_result
     
-    def _train_model_with_params(self, X_train: np.ndarray, y_train: np.ndarray, 
+    def _train_model_with_params(self, X_train: Any, y_train: Any, 
                                 hyperparameters: Dict[str, Any], model_type: str,
                                 quantile_alpha: float = None) -> Any:
         """Train model with specified hyperparameters using model factory."""

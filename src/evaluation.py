@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .structures import TrainingResult, ModelingStrategy
 from .metrics import MetricsCalculator
+from .data_loading import DataLoader
 
 logger = logging.getLogger(__name__)
 
@@ -44,28 +45,16 @@ class ModelEvaluator:
         
         logger.info(f"Evaluating trained model: {training_result.model_type}")
         
-        # Use test bdIDs from training result's split info
-        bdids_to_use = training_result.split_info.test_bdIDs
+        # Use DataLoader for centralized evaluation data preparation
+        X_test_filtered, y_test_filtered = DataLoader.prepare_evaluation_data(X_test, y_test, training_result)
         
-        # Filter to test data based on bdIDs from split info
-        test_features = X_test.filter(pl.col("bdID").is_in(bdids_to_use))
-        test_targets = y_test.filter(pl.col("bdID").is_in(bdids_to_use))
-        
-        if len(test_features) == 0:
+        if len(X_test_filtered) == 0:
             logger.warning("No test data found for evaluation")
             raise ValueError("No test data available for evaluation")
         
-        # Prepare features for prediction using training result's feature columns
-        # XGBoost models need pandas DataFrames for feature names, others use numpy
-        if "xgboost" in training_result.model_type.lower():
-            X_test_filtered = test_features.select(training_result.feature_columns).to_pandas()
-        else:
-            X_test_filtered = test_features.select(training_result.feature_columns).to_numpy()
-        y_test_filtered = test_targets.select(training_result.target_column).to_numpy().flatten()
-        
         # Make predictions using the trained model
         y_pred = training_result.model.predict(X_test_filtered)
-        y_pred = np.clip(np.round(y_pred).astype(int), 0, None)
+        #y_pred = np.clip(np.round(y_pred).astype(int), 0, None)
         
         # Calculate metrics using centralized metrics calculator
         if training_result.is_quantile_model():

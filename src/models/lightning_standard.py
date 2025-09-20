@@ -28,7 +28,7 @@ class ForecastingModel(L.LightningModule):
     Implements a 3-layer MLP architecture with dropout regularization.
     """
     
-    def __init__(self, input_size: int, hidden_size: int = 128, lr: float = 1e-3, dropout: float = 0.2):
+    def __init__(self, input_size: int, hidden_size: int = 128, lr: float = 0.001, dropout: float = 0.2):
         super().__init__()
         self.save_hyperparameters()
         
@@ -38,7 +38,7 @@ class ForecastingModel(L.LightningModule):
             nn.Dropout(dropout),
             nn.Linear(hidden_size, hidden_size // 2),
             nn.ReLU(), 
-            nn.Dropout(dropout * 0.5),  # Reduced dropout for second layer
+            nn.Dropout(dropout),
             nn.Linear(hidden_size // 2, 1)
         )
         
@@ -156,7 +156,7 @@ class LightningStandardModel(BaseModel):
         
     def train(self, X_train: np.ndarray, y_train: np.ndarray, **training_kwargs) -> None:
         """
-        Train the Lightning model with internal train/validation split.
+        Train the Lightning model using all provided training data.
         
         Args:
             X_train: Training features
@@ -164,30 +164,12 @@ class LightningStandardModel(BaseModel):
             **training_kwargs: Additional training parameters
         
         Note:
-            This method creates an internal train/validation split from the provided
-            training data to prevent data leakage. Test data is never used during training.
+            This method uses all provided training data for training without internal splits.
+            The framework handles proper train/test separation at a higher level.
         """
         try:
-            from sklearn.model_selection import train_test_split
-            
             # Store input size for model architecture
             self.input_size = X_train.shape[1]
-            
-            # Create internal train/validation split to prevent data leakage
-            validation_split = training_kwargs.get('validation_split', 0.2)
-            random_state = self.model_params.get('random_state', 42)
-            
-            if len(X_train) > 10:  # Only split if we have enough data
-                X_train_split, X_val_split, y_train_split, y_val_split = train_test_split(
-                    X_train, y_train, 
-                    test_size=validation_split, 
-                    random_state=random_state,
-                    shuffle=False  # Preserve temporal order for time series
-                )
-            else:
-                # Use all data for training if dataset is too small
-                X_train_split, y_train_split = X_train, y_train
-                X_val_split, y_val_split = None, None
             
             # Create Lightning model
             self.lightning_model = ForecastingModel(
@@ -197,11 +179,8 @@ class LightningStandardModel(BaseModel):
                 dropout=self.model_params.get("dropout", 0.2)
             )
             
-            # Create data loaders using internal split
-            train_loader = self._create_data_loader(X_train_split, y_train_split, shuffle=True)
-            val_loader = None
-            if X_val_split is not None and y_val_split is not None:
-                val_loader = self._create_data_loader(X_val_split, y_val_split, shuffle=False)
+            # Create data loader using all training data
+            train_loader = self._create_data_loader(X_train, y_train, shuffle=True)
             
             # Configure trainer
             max_epochs = self.model_params.get("max_epochs", 50)
@@ -220,17 +199,14 @@ class LightningStandardModel(BaseModel):
             
             self.trainer = L.Trainer(**trainer_kwargs)
             
-            # Train the model using internal validation split
-            self.trainer.fit(self.lightning_model, train_loader, val_loader)
+            # Train the model using all provided training data
+            self.trainer.fit(self.lightning_model, train_loader)
             
             # Set training flag
             self.is_trained = True
             self.model = self.lightning_model  # Store reference for consistency
             
-            if val_loader is not None:
-                logger.info(f"Lightning model training completed after {max_epochs} epochs with internal validation split")
-            else:
-                logger.info(f"Lightning model training completed after {max_epochs} epochs (no validation - dataset too small)")
+            logger.info(f"Lightning model training completed after {max_epochs} epochs using all {len(X_train)} training samples")
             
         except Exception as e:
             raise ModelTrainingError(f"Failed to train Lightning model: {str(e)}")
