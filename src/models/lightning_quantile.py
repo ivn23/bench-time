@@ -8,15 +8,14 @@ framework following the same patterns as other quantile models.
 
 import logging
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 import lightning as L
 
-from .base import BaseModel, ModelTrainingError, ModelPredictionError
+from .base import BaseModel, ModelPredictionError
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +193,7 @@ class LightningQuantileModel(BaseModel):
         
     def train(self, X_train: np.ndarray, y_train: np.ndarray, **training_kwargs) -> None:
         """
-        Train the Lightning quantile model with internal train/validation split.
+        Train the Lightning quantile model using all provided training data.
         
         Args:
             X_train: Training features
@@ -202,77 +201,52 @@ class LightningQuantileModel(BaseModel):
             **training_kwargs: Additional training parameters
         
         Note:
-            This method creates an internal train/validation split from the provided
-            training data to prevent data leakage. Test data is never used during training.
+            This method uses all provided training data for quantile regression training without internal splits.
+            The framework handles proper train/test separation at a higher level.
         """
-        try:
-            from sklearn.model_selection import train_test_split
-            
-            # Store input size for model architecture
-            self.input_size = X_train.shape[1]
-            
-            # Create internal train/validation split to prevent data leakage
-            validation_split = training_kwargs.get('validation_split', 0.2)
-            random_state = self.model_params.get('random_state', 42)
-            
-            if len(X_train) > 10:  # Only split if we have enough data
-                X_train_split, X_val_split, y_train_split, y_val_split = train_test_split(
-                    X_train, y_train, 
-                    test_size=validation_split, 
-                    random_state=random_state,
-                    shuffle=False  # Preserve temporal order for time series
-                )
-            else:
-                # Use all data for training if dataset is too small
-                X_train_split, y_train_split = X_train, y_train
-                X_val_split, y_val_split = None, None
-            
-            # Create Lightning quantile model
-            self.lightning_model = QuantileForecastingModel(
-                input_size=self.input_size,
-                quantile_alpha=self.quantile_alpha,
-                hidden_size=self.model_params.get("hidden_size", 128),
-                lr=self.model_params.get("lr", 1e-3),
-                dropout=self.model_params.get("dropout", 0.2)
-            )
-            
-            # Create data loaders using internal split
-            train_loader = self._create_data_loader(X_train_split, y_train_split, shuffle=True)
-            val_loader = None
-            if X_val_split is not None and y_val_split is not None:
-                val_loader = self._create_data_loader(X_val_split, y_val_split, shuffle=False)
-            
-            # Configure trainer
-            max_epochs = self.model_params.get("max_epochs", 50)
-            
-            # Create trainer with minimal configuration for compatibility
-            trainer_kwargs = {
-                "max_epochs": max_epochs,
-                "log_every_n_steps": max(10, len(train_loader) // 5),  # Adaptive logging
-                "enable_checkpointing": False,  # Disable checkpointing for simplicity
-                "logger": False,  # Disable logging for cleaner output
-                "enable_progress_bar": False  # Disable progress bar for cleaner output
-            }
-            
-            # Add any additional trainer kwargs from training_kwargs
-            trainer_kwargs.update(training_kwargs.get("trainer_kwargs", {}))
-            
-            self.trainer = L.Trainer(**trainer_kwargs)
-            
-            # Train the model using internal validation split
-            self.trainer.fit(self.lightning_model, train_loader, val_loader)
-            
-            # Set training flag
-            self.is_trained = True
-            self.model = self.lightning_model  # Store reference for consistency
-            
-            if val_loader is not None:
-                logger.info(f"Lightning quantile model training completed after {max_epochs} epochs with internal validation split")
-            else:
-                logger.info(f"Lightning quantile model training completed after {max_epochs} epochs (no validation - dataset too small)")
-            
-        except Exception as e:
-            raise ModelTrainingError(f"Failed to train Lightning quantile model: {str(e)}")
+
+        # Store input size for model architecture
+        self.input_size = X_train.shape[1]
+        
+        # Create Lightning quantile model
+        self.lightning_model = QuantileForecastingModel(
+            input_size=self.input_size,
+            quantile_alpha=self.quantile_alpha,
+            hidden_size=self.model_params.get("hidden_size", 128),
+            lr=self.model_params.get("lr", 1e-3),
+            dropout=self.model_params.get("dropout", 0.2)
+        )
+        
+        # Create data loader using all training data
+        train_loader = self._create_data_loader(X_train, y_train, shuffle=True)
+        
+        # Configure trainer
+        max_epochs = self.model_params.get("max_epochs", 50)
+        
+        # Create trainer with minimal configuration for compatibility
+        trainer_kwargs = {
+            "max_epochs": max_epochs,
+            "log_every_n_steps": max(10, len(train_loader) // 5),  # Adaptive logging
+            "enable_checkpointing": False,  # Disable checkpointing for simplicity
+            "logger": False,  # Disable logging for cleaner output
+            "enable_progress_bar": False  # Disable progress bar for cleaner output
+        }
+        
+        # Add any additional trainer kwargs from training_kwargs
+        trainer_kwargs.update(training_kwargs.get("trainer_kwargs", {}))
+        
+        self.trainer = L.Trainer(**trainer_kwargs)
+        
+        # Train the model using all provided training data
+        self.trainer.fit(self.lightning_model, train_loader)
+        
+        # Set training flag
+        self.is_trained = True
+        self.model = self.lightning_model  # Store reference for consistency
+        
+        logger.info(f"Lightning quantile model (α={self.quantile_alpha}) training completed after {max_epochs} epochs using all {len(X_train)} training samples")
+        
+
             
     def predict(self, X: np.ndarray) -> np.ndarray:
         """
@@ -290,25 +264,21 @@ class LightningQuantileModel(BaseModel):
         if not self.is_trained or self.lightning_model is None:
             raise ModelPredictionError("Model must be trained before making predictions")
             
-        try:
-            # Convert to tensor
-            X_tensor = self._convert_to_tensors(X)
+        # Convert to tensor
+        X_tensor = self._convert_to_tensors(X)
+        
+        # Set model to evaluation mode and make predictions
+        self.lightning_model.eval()
+        with torch.no_grad():
+            predictions = self.lightning_model(X_tensor).squeeze()
             
-            # Set model to evaluation mode and make predictions
-            self.lightning_model.eval()
-            with torch.no_grad():
-                predictions = self.lightning_model(X_tensor).squeeze()
-                
-                # Convert back to numpy
-                if predictions.dim() == 0:
-                    # Single prediction
-                    predictions = predictions.item()
-                    return np.array([predictions])
-                else:
-                    return predictions.numpy()
-                    
-        except Exception as e:
-            raise ModelPredictionError(f"Failed to make predictions: {str(e)}")
+            # Convert back to numpy
+            if predictions.dim() == 0:
+                # Single prediction
+                predictions = predictions.item()
+                return np.array([predictions])
+            else:
+                return predictions.numpy()
             
     def get_model_info(self) -> Dict[str, Any]:
         """
@@ -354,9 +324,7 @@ class LightningQuantileModel(BaseModel):
         """
         if not self.is_trained or self.lightning_model is None:
             raise ValueError("Model must be trained before saving")
-        
-        from pathlib import Path
-        
+                
         output_dir = Path(output_path)
         output_dir.mkdir(parents=True, exist_ok=True)
         
@@ -365,7 +333,6 @@ class LightningQuantileModel(BaseModel):
         self.trainer.save_checkpoint(str(checkpoint_path))
         
         # Save additional model metadata including quantile info
-        import torch
         metadata_path = output_dir / f"{filename}_metadata.pt"
         torch.save({
             "input_size": self.input_size,
@@ -384,24 +351,21 @@ class LightningQuantileModel(BaseModel):
         """
         if not self.is_trained or self.lightning_model is None:
             raise ValueError("Cannot save state of untrained model")
+        
+
+        # Save Lightning model checkpoint
+        checkpoint_path = path / "lightning_quantile_model.ckpt"
+        self.trainer.save_checkpoint(str(checkpoint_path))
+        
+        # Save additional model info
+        model_info_path = path / "model_info.pt"
+        torch.save({
+            "input_size": self.input_size,
+            "quantile_alpha": self.quantile_alpha,
+            "model_params": self.model_params,
+            "is_trained": self.is_trained
+        }, model_info_path)
             
-        try:
-            # Save Lightning model checkpoint
-            checkpoint_path = path / "lightning_quantile_model.ckpt"
-            self.trainer.save_checkpoint(str(checkpoint_path))
-            
-            # Save additional model info
-            model_info_path = path / "model_info.pt"
-            torch.save({
-                "input_size": self.input_size,
-                "quantile_alpha": self.quantile_alpha,
-                "model_params": self.model_params,
-                "is_trained": self.is_trained
-            }, model_info_path)
-            
-        except Exception as e:
-            logger.error(f"Failed to save Lightning quantile model state: {e}")
-            raise
             
     def load_state(self, path: Path) -> None:
         """
@@ -410,29 +374,25 @@ class LightningQuantileModel(BaseModel):
         Args:
             path: Directory path containing saved model state
         """
-        try:
-            # Load model info
-            model_info_path = path / "model_info.pt"
-            if model_info_path.exists():
-                model_info = torch.load(model_info_path)
-                self.input_size = model_info["input_size"]
-                self.quantile_alpha = model_info["quantile_alpha"]
-                self.model_params = model_info["model_params"]
-                self.is_trained = model_info["is_trained"]
-            
-            # Load Lightning model
-            checkpoint_path = path / "lightning_quantile_model.ckpt"
-            if checkpoint_path.exists():
-                self.lightning_model = QuantileForecastingModel.load_from_checkpoint(
-                    str(checkpoint_path),
-                    input_size=self.input_size,
-                    quantile_alpha=self.quantile_alpha,
-                    hidden_size=self.model_params.get("hidden_size", 128),
-                    lr=self.model_params.get("lr", 1e-3),
-                    dropout=self.model_params.get("dropout", 0.2)
-                )
-                self.model = self.lightning_model
+        # Load model info
+        model_info_path = path / "model_info.pt"
+        if model_info_path.exists():
+            model_info = torch.load(model_info_path)
+            self.input_size = model_info["input_size"]
+            self.quantile_alpha = model_info["quantile_alpha"]
+            self.model_params = model_info["model_params"]
+            self.is_trained = model_info["is_trained"]
+        
+        # Load Lightning model
+        checkpoint_path = path / "lightning_quantile_model.ckpt"
+        if checkpoint_path.exists():
+            self.lightning_model = QuantileForecastingModel.load_from_checkpoint(
+                str(checkpoint_path),
+                input_size=self.input_size,
+                quantile_alpha=self.quantile_alpha,
+                hidden_size=self.model_params.get("hidden_size", 128),
+                lr=self.model_params.get("lr", 1e-3),
+                dropout=self.model_params.get("dropout", 0.2)
+            )
+            self.model = self.lightning_model
                 
-        except Exception as e:
-            logger.error(f"Failed to load Lightning quantile model state: {e}")
-            raise

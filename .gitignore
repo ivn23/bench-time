@@ -80,3 +80,6 @@ specs/
 .serena/*
 artifacts/
 Transformers_code/
+
+specs/*
+.serena/*

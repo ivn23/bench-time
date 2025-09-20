@@ -135,14 +135,8 @@ class BenchmarkPipeline:
         # Create and train model
         model_instance = model_class(**model_params)
         
-        # Convert to appropriate format for training - only use feature columns
-        # XGBoost models need pandas DataFrames for feature names, others use numpy
-        if "xgboost" in config.model_type.lower():
-            X_train = dataset.X_train.select(dataset.feature_cols).to_pandas()
-            y_train = dataset.y_train.select(dataset.target_col).to_pandas()[dataset.target_col]
-        else:
-            X_train = dataset.X_train.select(dataset.feature_cols).to_numpy()
-            y_train = dataset.y_train.select(dataset.target_col).to_numpy().flatten()
+        # Use DataLoader for centralized data preparation
+        X_train, y_train = DataLoader.prepare_training_data(dataset, config.model_type)
         
         # Train the model 
         model_instance.train(X_train, y_train)
