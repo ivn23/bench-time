@@ -1,5 +1,5 @@
 """
-Comprehensive Release Manager for consolidating complete experiment outputs.
+Release Manager for consolidating complete experiment outputs.
 """
 
 import json
@@ -8,15 +8,15 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional, Union
 
-from ..data_structures import BenchmarkModel
+from ..structures import TrainingResult
 from ..storage_utils import HierarchicalStorageManager
 
 logger = logging.getLogger(__name__)
 
 
-class ComprehensiveReleaseManager:
+class ReleaseManager:
     """
-    Comprehensive release manager that consolidates all experiment outputs
+    Release manager that consolidates all experiment outputs
     into complete, self-contained release packages.
     
     This manager acts as a post-training consolidator that gathers:
@@ -52,7 +52,7 @@ class ComprehensiveReleaseManager:
         release_name = f"release_{experiment_results.experiment_name}_{timestamp_str}"
         release_dir = base_output_dir / release_name
         
-        logger.info(f"Creating comprehensive release: {release_name}")
+        logger.info(f"Creating release: {release_name}")
         
         # Ensure release directory exists
         release_dir.mkdir(parents=True, exist_ok=True)
@@ -104,7 +104,7 @@ class ComprehensiveReleaseManager:
         
         logger.debug(f"Bundle created: {bundle_path}")
     
-    def _create_models_directory(self, models: list[BenchmarkModel], release_dir: Path):
+    def _create_models_directory(self, models: list[TrainingResult], release_dir: Path):
         """Create models directory with all trained models."""
         logger.debug("Creating models directory")
         
@@ -113,9 +113,9 @@ class ComprehensiveReleaseManager:
         
         for model in models:
             # Create model filename based on SKU information
-            if model.metadata.sku_tuples:
+            if model.sku_tuples:
                 # For individual models, use first SKU tuple
-                sku = model.metadata.sku_tuples[0]
+                sku = model.sku_tuples[0]
                 model_filename = f"model_{sku[1]}_{sku[0]}"  # store_id, product_id
             else:
                 # Fallback for combined models or models without SKU info
@@ -266,22 +266,21 @@ for complete configuration details.
         else:
             return str(config)
     
-    def _serialize_model_metadata(self, model: BenchmarkModel) -> Dict[str, Any]:
+    def _serialize_model_metadata(self, model: TrainingResult) -> Dict[str, Any]:
         """Serialize model metadata for bundle.json."""
-        metadata = model.metadata
-        
         return {
-            'model_id': metadata.model_id,
-            'model_type': metadata.model_type,
-            'modeling_strategy': metadata.modeling_strategy.value,
-            'sku_tuples': metadata.sku_tuples,
-            'store_id': metadata.store_id,
-            'product_id': metadata.product_id,
-            'hyperparameters': metadata.hyperparameters,
-            'performance_metrics': metadata.performance_metrics,
-            'feature_columns': metadata.feature_columns,
-            'target_column': metadata.target_column,
-            'training_date_range': metadata.training_date_range,
-            'model_instance': metadata.model_instance,
-            'quantile_level': metadata.quantile_level
+            'model_type': model.model_type,
+            'modeling_strategy': model.modeling_strategy.value,
+            'sku_tuples': model.sku_tuples,
+            'hyperparameters': model.hyperparameters,
+            'performance_metrics': model.performance_metrics,
+            'feature_columns': model.feature_columns,
+            'target_column': model.target_column,
+            'training_loss': model.training_loss,
+            'quantile_level': model.quantile_level,
+            'split_info': {
+                'train_bdIDs': model.split_info.train_bdIDs.tolist() if model.split_info.train_bdIDs is not None else None,
+                'test_bdIDs': model.split_info.test_bdIDs.tolist() if model.split_info.test_bdIDs is not None else None,
+                'split_date': model.split_info.split_date
+            }
         }

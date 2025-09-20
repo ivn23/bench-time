@@ -1,49 +1,52 @@
 """
 M5 Benchmarking Framework
 
-A comprehensive framework for multi-SKU time series forecasting benchmarking
+A simplified framework for multi-SKU time series forecasting benchmarking
 using the M5 competition dataset.
+
+This version uses clean, focused data structures for streamlined functionality.
 """
 
-from .data_structures import (
-    ModelingStrategy, SkuTuple, SkuList, ModelMetadata, DataSplit, BenchmarkModel, TrainedModel,
-    ModelRegistry, DataConfig, ModelTypeConfig, ModelingDataset
+# Data structures and core functionality
+from .structures import (
+    ModelingStrategy, SkuTuple, SkuList, DataConfig, ModelingDataset,
+    ModelConfig, SplitInfo, TrainingResult, ExperimentResults,
+    create_config, validate_sku_tuples, validate_modeling_strategy
 )
 
-from .experiment_config import (
-    ExperimentConfig, ExperimentResults, create_experiment_config,
-    validate_sku_tuples, validate_modeling_strategy
-)
-
+# Core modules
 from .data_loading import DataLoader
 from .model_training import ModelTrainer
 from .evaluation import ModelEvaluator
-from .benchmark_pipeline import BenchmarkPipeline
-from .release_management import ComprehensiveReleaseManager
+from .pipeline import BenchmarkPipeline
+from .release_management import ReleaseManager
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 __author__ = "M5 Benchmarking Team"
 
 __all__ = [
+    # Core types
     "ModelingStrategy",
-    "SkuTuple",
+    "SkuTuple", 
     "SkuList",
-    "ModelMetadata", 
-    "DataSplit",
-    "BenchmarkModel",
-    "TrainedModel",
-    "ModelRegistry",
+    
+    # Data structures
     "DataConfig",
-    "ModelTypeConfig",
     "ModelingDataset",
-    "ExperimentConfig",
+    "ModelConfig",
+    "SplitInfo",
+    "TrainingResult",
     "ExperimentResults",
-    "create_experiment_config",
+    
+    # Factory functions
+    "create_config",
     "validate_sku_tuples",
     "validate_modeling_strategy",
+    
+    # Core modules
     "DataLoader",
     "ModelTrainer",
     "ModelEvaluator",
     "BenchmarkPipeline",
-    "ComprehensiveReleaseManager"
+    "ReleaseManager"
 ]

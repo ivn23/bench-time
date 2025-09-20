@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Tuple, Any
 from pathlib import Path
 import logging
 
-from .data_structures import DataConfig, ModelingStrategy, ModelingDataset, SkuList
+from .structures import DataConfig, ModelingStrategy, ModelingDataset, SkuList
 
 logger = logging.getLogger(__name__)
 
@@ -82,15 +82,15 @@ class DataLoader:
         date_column: str = "date"
     ) -> Tuple[np.ndarray, np.ndarray, str]:
         """
-        Create temporal train/validation split based on percentage.
+        Create temporal train/test split based on percentage.
         
         Args:
             df: DataFrame to split
-            validation_split: Proportion of data for validation
+            validation_split: Proportion of data for test set (despite the name, this creates test data)
             date_column: Date column name for temporal ordering
             
         Returns:
-            Tuple of (train_bdIDs, validation_bdIDs, split_info)
+            Tuple of (train_bdIDs, test_bdIDs, split_info)
         """
         # Get unique dates and sort them
         unique_dates = df.select(date_column).unique().sort(date_column)
@@ -102,12 +102,12 @@ class DataLoader:
         
         # Split data based on date
         train_data = df.filter(pl.col(date_column) < split_date)
-        validation_data = df.filter(pl.col(date_column) >= split_date)
+        test_data = df.filter(pl.col(date_column) >= split_date)
         
         train_bdids = train_data.select("bdID").to_numpy().flatten()
-        validation_bdids = validation_data.select("bdID").to_numpy().flatten()
+        test_bdids = test_data.select("bdID").to_numpy().flatten()
         
-        return train_bdids, validation_bdids, str(split_date)
+        return train_bdids, test_bdids, str(split_date)
     
     def create_temporal_split_by_date(
         self, 
@@ -116,7 +116,7 @@ class DataLoader:
         date_column: str = "date"
     ) -> Tuple[np.ndarray, np.ndarray, str]:
         """
-        Create temporal train/validation split based on a specific date.
+        Create temporal train/test split based on a specific date.
         
         Args:
             df: DataFrame to split
@@ -124,7 +124,7 @@ class DataLoader:
             date_column: Column containing dates
             
         Returns:
-            Tuple of (train_bdIDs, validation_bdIDs, split_date)
+            Tuple of (train_bdIDs, test_bdIDs, split_date)
         """
         # Sort by date to ensure chronological order
         df_sorted = df.sort(date_column)
@@ -134,15 +134,15 @@ class DataLoader:
         
         # Split based on date
         train_mask = pl.col(date_column) < split_date_obj
-        val_mask = pl.col(date_column) >= split_date_obj
+        test_mask = pl.col(date_column) >= split_date_obj
         
         train_bdids = df_sorted.filter(train_mask).select("bdID").to_numpy().flatten()
-        val_bdids = df_sorted.filter(val_mask).select("bdID").to_numpy().flatten()
+        test_bdids = df_sorted.filter(test_mask).select("bdID").to_numpy().flatten()
         
-        logger.info(f"Created temporal split by date: {len(train_bdids)} train, {len(val_bdids)} validation")
+        logger.info(f"Created temporal split by date: {len(train_bdids)} train, {len(test_bdids)} test")
         logger.info(f"Split date: {split_date}")
         
-        return train_bdids, val_bdids, split_date
+        return train_bdids, test_bdids, split_date
 
     def get_feature_columns(self, df: pl.DataFrame) -> List[str]:
         """Get list of feature columns, excluding metadata columns."""
@@ -208,10 +208,11 @@ class DataLoader:
             y_test=y_test,
             feature_cols=feature_cols,
             target_col=self.config.target_column,
-            split_info=split_info,
-            dataset_stats=dataset_stats,
             sku_tuples=sku_tuples,
-            modeling_strategy=modeling_strategy
+            modeling_strategy=modeling_strategy,
+            train_bdids=split_info.get('train_bdids', np.array([])),
+            test_bdids=split_info.get('test_bdids', np.array([])),
+            split_date=split_info.get('split_date')
         )
     
     def _filter_sku_data(self, sku_tuples: SkuList, strategy: ModelingStrategy) -> Tuple[pl.DataFrame, pl.DataFrame]:

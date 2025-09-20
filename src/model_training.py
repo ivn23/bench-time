@@ -10,9 +10,9 @@ from typing import Dict, Any, List, Tuple, Optional
 import logging
 
 from .model_types import model_registry
-from .data_structures import (
-    TrainedModel, DataSplit, ModelingStrategy, SkuList,
-    ModelTypeConfig, ModelingDataset
+from .structures import (
+    TrainingResult, SplitInfo, ModelingStrategy, SkuList,
+    ModelConfig, ModelingDataset
 )
 
 logger = logging.getLogger(__name__)
@@ -21,24 +21,24 @@ logger = logging.getLogger(__name__)
 class ModelTrainer:
     """Model training with fixed hyperparameters."""
     
-    def __init__(self, model_config: ModelTypeConfig, random_state: int = 42):
+    def __init__(self, model_config: ModelConfig, random_state: int = 42):
         self.model_config = model_config
         self.random_state = random_state
     
-    def train_model(self, dataset: ModelingDataset, model_type: str) -> List['TrainedModel']:
+    def train_model(self, dataset: ModelingDataset, model_type: str) -> List['TrainingResult']:
         """
         Train model(s) using ModelingDataset with simplified interface.
         Supports multiple quantile levels for quantile models.
         
-        PURE TRAINING: Returns TrainedModel objects without any evaluation logic.
-        All metrics calculation is handled by ModelEvaluator.
+        SIMPLIFIED TRAINING: Returns TrainingResult objects directly with embedded training information.
+        Evaluation can be done separately on the TrainingResult objects.
         
         Args:
             dataset: Complete modeling dataset with all necessary data
             model_type: Type of model to train (should match configured type)
             
         Returns:
-            List of trained TrainedModel(s) - multiple models for multi-quantile configs
+            List of trained TrainingResult(s) - multiple models for multi-quantile configs
         """
         # Validate that the provided model_type matches the configured type
         if model_type != self.model_config.model_type:
@@ -58,7 +58,7 @@ class ModelTrainer:
             return [model]
 
     
-    def _train_quantile_models(self, dataset: ModelingDataset, model_type: str, quantile_alphas: List[float]) -> List['TrainedModel']:
+    def _train_quantile_models(self, dataset: ModelingDataset, model_type: str, quantile_alphas: List[float]) -> List['TrainingResult']:
         """Train multiple quantile models for different quantile levels."""
         models = []
         
@@ -73,12 +73,12 @@ class ModelTrainer:
         logger.info(f"Completed training {len(models)} quantile models")
         return models
     
-    def _train_single_model(self, dataset: ModelingDataset, model_type: str, quantile_alpha: Optional[float] = None) -> 'TrainedModel':
+    def _train_single_model(self, dataset: ModelingDataset, model_type: str, quantile_alpha: Optional[float] = None) -> 'TrainingResult':
         """
         Train a single model (quantile or standard) using ModelingDataset.
         
-        PURE TRAINING: No evaluation, metrics calculation, or test predictions.
-        Returns TrainedModel with only training results and basic metadata.
+        SIMPLIFIED TRAINING: No evaluation, metrics calculation, or test predictions.
+        Returns TrainingResult with training results and basic metadata.
         """
         
         # Convert to numpy arrays for training
@@ -101,39 +101,39 @@ class ModelTrainer:
         
         # Train model with fixed hyperparameters using model factory
         final_model = self._train_model_with_params(
-            X_train_np, y_train_np, hyperparameters, model_type,
-            X_val=X_test_np, y_val=y_test_np, quantile_alpha=quantile_alpha
+            X_train_np, y_train_np, hyperparameters, model_type, quantile_alpha=quantile_alpha
         )
         
-        # Create data split info from dataset split_info
-        data_split = DataSplit(
-            train_bdIDs=dataset.split_info["train_bdids"],
-            validation_bdIDs=dataset.split_info["test_bdids"],  # Using test as validation for consistency
-            split_date=dataset.split_info["split_date"]
-        )
+        # Get training loss if available
+        training_loss = None
+        if hasattr(final_model, 'loss_') and final_model.loss_ is not None:
+            training_loss = float(final_model.loss_)
+        elif hasattr(final_model, 'best_score') and final_model.best_score is not None:
+            training_loss = float(final_model.best_score)
         
-        # Create TrainedModel with pure training results (NO METRICS)
-        trained_model = TrainedModel(
+        # Get split info from dataset
+        split_info = dataset.get_split_info()
+        
+        # Create TrainingResult with training results (NO METRICS)
+        training_result = TrainingResult(
             model=final_model,
             model_type=model_type,
             modeling_strategy=dataset.modeling_strategy,
             sku_tuples=dataset.sku_tuples,
             hyperparameters=hyperparameters,
-            training_config={"model_config": self.model_config.__dict__, "random_state": self.random_state},
             feature_columns=dataset.feature_cols,
             target_column=dataset.target_col,
-            data_split=data_split,
-            quantile_level=quantile_alpha,
-            model_instance="default"
+            split_info=split_info,
+            training_loss=training_loss,
+            quantile_level=quantile_alpha
         )
         
         logger.info(f"Model training completed (no evaluation performed)")
         
-        return trained_model
+        return training_result
     
     def _train_model_with_params(self, X_train: np.ndarray, y_train: np.ndarray, 
                                 hyperparameters: Dict[str, Any], model_type: str,
-                                X_val: np.ndarray = None, y_val: np.ndarray = None,
                                 quantile_alpha: float = None) -> Any:
         """Train model with specified hyperparameters using model factory."""
         try:           
@@ -153,7 +153,7 @@ class ModelTrainer:
             
             # Train the model
             if hasattr(model_instance, 'train'):
-                model_instance.train(X_train, y_train, X_val, y_val)
+                model_instance.train(X_train, y_train)
             else:
                 # Fallback to fit method for scikit-learn compatible models
                 model_instance.fit(X_train, y_train)

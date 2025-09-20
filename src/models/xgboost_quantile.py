@@ -5,7 +5,7 @@ This module implements quantile regression using XGBoost with a custom objective
 based on the approach from the quantile_xgboost_simple.ipynb notebook.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 import numpy as np
 import xgboost as xgb
 
@@ -22,16 +22,6 @@ class XGBoostQuantileModel(BaseModel):
     
     MODEL_TYPE = "xgboost_quantile"
     DESCRIPTION = "Quantile XGBoost regression model with custom objective"
-    DEFAULT_HYPERPARAMETERS = {
-        "tree_method": "hist",
-        "max_depth": 6,
-        "learning_rate": 0.3,
-        "subsample": 1.0,
-        "colsample_bytree": 1.0,
-        "reg_alpha": 0.0,
-        "reg_lambda": 1.0,
-        "random_state": 42
-    }
     REQUIRES_QUANTILE = True
     
     def __init__(self, quantile_alphas: List[float] = None, **model_params):
@@ -64,6 +54,13 @@ class XGBoostQuantileModel(BaseModel):
             'random_state': 42
         }
         
+        # Handle n_estimators separately (will be converted to num_boost_round in train())
+        # Remove it from model_params to avoid the warning
+        if 'n_estimators' in self.model_params:
+            self.n_estimators = self.model_params.pop('n_estimators')
+        else:
+            self.n_estimators = 100  # default value
+        
         # Update with provided parameters
         for key, value in default_params.items():
             if key not in self.model_params:
@@ -95,40 +92,40 @@ class XGBoostQuantileModel(BaseModel):
         
         return objective
         
-    def train(self, X_train: np.ndarray, y_train: np.ndarray,
-              X_val: Optional[np.ndarray] = None, y_val: Optional[np.ndarray] = None,
-              num_boost_round: int = 100, **training_kwargs) -> None:
+    def train(self, X_train: np.ndarray, y_train: np.ndarray, **training_kwargs) -> None:
         """
         Train the quantile XGBoost model using custom objective.
         
         Args:
             X_train: Training features
             y_train: Training targets
-            X_val: Validation features (optional)
-            y_val: Validation targets (optional)
-            num_boost_round: Number of boosting rounds
             **training_kwargs: Additional training parameters
         """
-        try:
-            # Create DMatrix for training data
-            dtrain = xgb.DMatrix(X_train, label=y_train)
+
+        # Create DMatrix for training data
+        dtrain = xgb.DMatrix(X_train, label=y_train)
+        
+        # Use n_estimators stored during initialization as num_boost_round
+        num_boost_round = self.n_estimators
+        
+        # Override with explicit num_boost_round if provided in training_kwargs
+        if 'num_boost_round' in training_kwargs:
+            num_boost_round = training_kwargs.pop('num_boost_round')
+        
+        # Create quantile objective function
+        quantile_objective = self._create_quantile_objective()
+        
+        # Train model with custom objective
+        self.model = xgb.train(
+            params=self.model_params,
+            dtrain=dtrain,
+            num_boost_round=num_boost_round,
+            obj=quantile_objective,
+            verbose_eval=False
+        )
+        
+        self.is_trained = True
             
-            # Create quantile objective function
-            quantile_objective = self._create_quantile_objective()
-            
-            # Train model with custom objective
-            self.model = xgb.train(
-                params=self.model_params,
-                dtrain=dtrain,
-                num_boost_round=num_boost_round,
-                obj=quantile_objective,
-                verbose_eval=False
-            )
-            
-            self.is_trained = True
-            
-        except Exception as e:
-            raise ModelTrainingError(f"Failed to train XGBoost quantile model: {str(e)}")
             
     def predict(self, X: np.ndarray) -> np.ndarray:
         """
@@ -146,12 +143,10 @@ class XGBoostQuantileModel(BaseModel):
         if not self.is_trained:
             raise ModelPredictionError("Model must be trained before making predictions")
             
-        try:
-            # Create DMatrix for prediction
-            dtest = xgb.DMatrix(X)
-            return self.model.predict(dtest)
-        except Exception as e:
-            raise ModelPredictionError(f"Failed to make predictions: {str(e)}")
+        # Create DMatrix for prediction
+        dtest = xgb.DMatrix(X)
+        return self.model.predict(dtest)
+
             
     def get_model_info(self) -> Dict[str, Any]:
         """

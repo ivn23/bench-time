@@ -22,16 +22,6 @@ class XGBoostStandardModel(BaseModel):
     
     MODEL_TYPE = "xgboost_standard"
     DESCRIPTION = "Standard XGBoost regression model"
-    DEFAULT_HYPERPARAMETERS = {
-        "n_estimators": 100,
-        "max_depth": 6,
-        "learning_rate": 0.3,
-        "subsample": 0.8,
-        "colsample_bytree": 0.8,
-        "reg_alpha": 0.1,
-        "reg_lambda": 1.0,
-        "random_state": 42
-    }
     
     def __init__(self, **model_params):
         """
@@ -43,31 +33,22 @@ class XGBoostStandardModel(BaseModel):
         super().__init__(**model_params)
         self.model_type = "xgboost"
         
-    def train(self, X_train: np.ndarray, y_train: np.ndarray,
-              X_val: Optional[np.ndarray] = None, y_val: Optional[np.ndarray] = None,
-              **training_kwargs) -> None:
+    def train(self, X_train: np.ndarray, y_train: np.ndarray) -> None:
         """
         Train the XGBoost model.
         
         Args:
             X_train: Training features
             y_train: Training targets
-            X_val: Validation features (not used in standard implementation)
-            y_val: Validation targets (not used in standard implementation) 
-            **training_kwargs: Additional parameters (ignored)
         """
-        try:
-            # Create XGBoost regressor with parameters
-            self.model = xgb.XGBRegressor(**self.model_params)
-            
-            # Train the model
-            self.model.fit(X_train, y_train)
-            
-            self.is_trained = True
-            
-        except Exception as e:
-            raise ModelTrainingError(f"Failed to train XGBoost standard model: {str(e)}")
-            
+        # Create XGBoost regressor with parameters
+        self.model = xgb.XGBRegressor(**self.model_params)
+        
+        # Train the model
+        self.model.fit(X_train, y_train)
+        
+        self.is_trained = True
+         
     def predict(self, X: np.ndarray) -> np.ndarray:
         """
         Make predictions using the trained model.
@@ -84,10 +65,7 @@ class XGBoostStandardModel(BaseModel):
         if not self.is_trained:
             raise ModelPredictionError("Model must be trained before making predictions")
             
-        try:
-            return self.model.predict(X)
-        except Exception as e:
-            raise ModelPredictionError(f"Failed to make predictions: {str(e)}")
+        return self.model.predict(X)
             
     def get_model_info(self) -> Dict[str, Any]:
         """

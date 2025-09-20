@@ -5,11 +5,11 @@ This module provides a clean release management system where models handle
 their own persistence through the save_model() method.
 
 Key Components:
-- ComprehensiveReleaseManager: Orchestrates complete experiment releases
+- ReleaseManager: Orchestrates complete experiment releases
 """
 
-from .comprehensive_manager import ComprehensiveReleaseManager
+from .release_manager import ReleaseManager
 
 __all__ = [
-    "ComprehensiveReleaseManager",
+    "ReleaseManager",
 ]

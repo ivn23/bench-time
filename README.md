@@ -45,7 +45,7 @@ src/
 │   └── models/statquant_model.py  # Statistical quantile baseline
 │
 └── Release Management System
-    ├── comprehensive_manager.py    # Main release manager
+    ├── release_manager.py    # Main release manager
     ├── factory.py                 # Model type factory pattern
     ├── base.py                    # Base classes for release management
     ├── utils.py                   # Utility functions
@@ -67,7 +67,7 @@ src/
 - **ModelTypeRegistry**: Dynamic model discovery with plugin architecture
 - **BenchmarkPipeline**: Complete workflow orchestration with experiment tracking
 - **ModelRegistry**: Hierarchical model storage and lifecycle management
-- **ComprehensiveReleaseManager**: Production-ready model lifecycle management
+- **ReleaseManager**: Production-ready model lifecycle management
 
 ## Installation
 
@@ -334,10 +334,10 @@ baseline_models = pipeline.run_experiment(
 ### Release Management System
 
 ```python
-from src import ComprehensiveReleaseManager
+from src import ReleaseManager
 
 # Initialize release manager for model lifecycle management
-release_manager = ComprehensiveReleaseManager()
+release_manager = ReleaseManager()
 
 # Deploy models to production environment
 release_manager.deploy_models(model_ids, environment="production")

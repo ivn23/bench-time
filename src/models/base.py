@@ -30,18 +30,18 @@ class BaseModel(ABC):
         self.is_trained = False
         
     @abstractmethod
-    def train(self, X_train: np.ndarray, y_train: np.ndarray, 
-              X_val: Optional[np.ndarray] = None, y_val: Optional[np.ndarray] = None,
-              **training_kwargs) -> None:
+    def train(self, X_train: np.ndarray, y_train: np.ndarray, **training_kwargs) -> None:
         """
         Train the model on provided data.
         
         Args:
             X_train: Training features
-            y_train: Training targets  
-            X_val: Validation features (optional)
-            y_val: Validation targets (optional)
+            y_train: Training targets
             **training_kwargs: Additional training parameters
+        
+        Note:
+            Models that require validation data should create internal train/validation
+            splits from the provided training data to prevent data leakage.
         """
         pass
         
