@@ -85,3 +85,7 @@ specs/
 .serena/*
 
 lightning_model_releases/
+Benchmarking.code-workspace
+pipeline_test_executed.ipynb
+pipeline_test.ipynb
+.claude
