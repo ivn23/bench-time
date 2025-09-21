@@ -82,10 +82,12 @@ artifacts/
 Transformers_code/
 
 specs/
-.serena/*
+.serena/
 
 lightning_model_releases/
 Benchmarking.code-workspace
 pipeline_test_executed.ipynb
 pipeline_test.ipynb
 .claude
+
+pytest.ini
