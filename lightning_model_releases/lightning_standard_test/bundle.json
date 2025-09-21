@@ -1,0 +1,38 @@
+{
+  "model_type": "lightning_standard",
+  "sku_tuples": [
+    [
+      81054,
+      1335
+    ],
+    [
+      81054,
+      1334
+    ],
+    [
+      80558,
+      1331
+    ]
+  ],
+  "product_ids": [
+    80558,
+    81054
+  ],
+  "store_ids": [
+    1331,
+    1334,
+    1335
+  ],
+  "quantiles": [],
+  "hyperparameters": {
+    "hidden_size": 128,
+    "lr": 0.001,
+    "num_layers": 2,
+    "dropout": 0.2,
+    "max_epochs": 50,
+    "batch_size": 64,
+    "random_state": 42
+  },
+  "experiment_name": "lightning_standard_test",
+  "num_models": 3
+}

@@ -196,7 +196,6 @@ class TrainingResult:
     - Data split information
     - SKU information
     - Model parameters
-    - Training loss (if available)
     - Test performance metrics (optional)
     """
     # Core model information
@@ -214,7 +213,6 @@ class TrainingResult:
     split_info: SplitInfo
     
     # Results and metrics
-    training_loss: Optional[float] = None
     performance_metrics: Dict[str, float] = field(default_factory=dict)
     
     # Optional metadata
@@ -275,9 +273,6 @@ class TrainingResult:
             "has_test_metrics": self.has_test_metrics()
         }
         
-        if self.training_loss is not None:
-            summary["training_loss"] = self.training_loss
-            
         if self.quantile_level is not None:
             summary["quantile_level"] = self.quantile_level
             

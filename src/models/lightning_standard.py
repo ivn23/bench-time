@@ -167,50 +167,47 @@ class LightningStandardModel(BaseModel):
             This method uses all provided training data for training without internal splits.
             The framework handles proper train/test separation at a higher level.
         """
-        try:
-            # Store input size for model architecture
-            self.input_size = X_train.shape[1]
-            
-            # Create Lightning model
-            self.lightning_model = ForecastingModel(
-                input_size=self.input_size,
-                hidden_size=self.model_params.get("hidden_size", 128),
-                lr=self.model_params.get("lr", 1e-3),
-                dropout=self.model_params.get("dropout", 0.2)
-            )
-            
-            # Create data loader using all training data
-            train_loader = self._create_data_loader(X_train, y_train, shuffle=True)
-            
-            # Configure trainer
-            max_epochs = self.model_params.get("max_epochs", 50)
-            
-            # Create trainer with minimal configuration for compatibility
-            trainer_kwargs = {
-                "max_epochs": max_epochs,
-                "log_every_n_steps": max(10, len(train_loader) // 5),  # Adaptive logging
-                "enable_checkpointing": False,  # Disable checkpointing for simplicity
-                "logger": False,  # Disable logging for cleaner output
-                "enable_progress_bar": False  # Disable progress bar for cleaner output
-            }
-            
-            # Add any additional trainer kwargs from training_kwargs
-            trainer_kwargs.update(training_kwargs.get("trainer_kwargs", {}))
-            
-            self.trainer = L.Trainer(**trainer_kwargs)
-            
-            # Train the model using all provided training data
-            self.trainer.fit(self.lightning_model, train_loader)
-            
-            # Set training flag
-            self.is_trained = True
-            self.model = self.lightning_model  # Store reference for consistency
-            
-            logger.info(f"Lightning model training completed after {max_epochs} epochs using all {len(X_train)} training samples")
-            
-        except Exception as e:
-            raise ModelTrainingError(f"Failed to train Lightning model: {str(e)}")
-            
+
+        # Store input size for model architecture
+        self.input_size = X_train.shape[1]
+        
+        # Create Lightning model
+        self.lightning_model = ForecastingModel(
+            input_size=self.input_size,
+            hidden_size=self.model_params.get("hidden_size", 128),
+            lr=self.model_params.get("lr", 1e-3),
+            dropout=self.model_params.get("dropout", 0.2)
+        )
+        
+        # Create data loader using all training data
+        train_loader = self._create_data_loader(X_train, y_train, shuffle=True)
+        
+        # Configure trainer
+        max_epochs = self.model_params.get("max_epochs", 50)
+        
+        # Create trainer with minimal configuration for compatibility
+        trainer_kwargs = {
+            "max_epochs": max_epochs,
+            "log_every_n_steps": max(10, len(train_loader) // 5),  # Adaptive logging
+            "enable_checkpointing": False,  # Disable checkpointing for simplicity
+            "logger": False,  # Disable logging for cleaner output
+            "enable_progress_bar": False  # Disable progress bar for cleaner output
+        }
+        
+        # Add any additional trainer kwargs from training_kwargs
+        trainer_kwargs.update(training_kwargs.get("trainer_kwargs", {}))
+        
+        self.trainer = L.Trainer(**trainer_kwargs)
+        
+        # Train the model using all provided training data
+        self.trainer.fit(self.lightning_model, train_loader)
+        
+        # Set training flag
+        self.is_trained = True
+        self.model = self.lightning_model  # Store reference for consistency
+        
+        logger.info(f"Lightning model training completed after {max_epochs} epochs using all {len(X_train)} training samples")
+        
     def predict(self, X: np.ndarray) -> np.ndarray:
         """
         Make predictions using the trained Lightning model.
@@ -227,25 +224,22 @@ class LightningStandardModel(BaseModel):
         if not self.is_trained or self.lightning_model is None:
             raise ModelPredictionError("Model must be trained before making predictions")
             
-        try:
-            # Convert to tensor
-            X_tensor = self._convert_to_tensors(X)
+
+        # Convert to tensor
+        X_tensor = self._convert_to_tensors(X)
+        
+        # Set model to evaluation mode and make predictions
+        self.lightning_model.eval()
+        with torch.no_grad():
+            predictions = self.lightning_model(X_tensor).squeeze()
             
-            # Set model to evaluation mode and make predictions
-            self.lightning_model.eval()
-            with torch.no_grad():
-                predictions = self.lightning_model(X_tensor).squeeze()
-                
-                # Convert back to numpy
-                if predictions.dim() == 0:
-                    # Single prediction
-                    predictions = predictions.item()
-                    return np.array([predictions])
-                else:
-                    return predictions.numpy()
-                    
-        except Exception as e:
-            raise ModelPredictionError(f"Failed to make predictions: {str(e)}")
+            # Convert back to numpy
+            if predictions.dim() == 0:
+                # Single prediction
+                predictions = predictions.item()
+                return np.array([predictions])
+            else:
+                return predictions.numpy()
             
     def get_model_info(self) -> Dict[str, Any]:
         """
@@ -291,7 +285,6 @@ class LightningStandardModel(BaseModel):
         if not self.is_trained or self.lightning_model is None:
             raise ValueError("Model must be trained before saving")
         
-        from pathlib import Path
         
         output_dir = Path(output_path)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -320,22 +313,20 @@ class LightningStandardModel(BaseModel):
         if not self.is_trained or self.lightning_model is None:
             raise ValueError("Cannot save state of untrained model")
             
-        try:
-            # Save Lightning model checkpoint
-            checkpoint_path = path / "lightning_model.ckpt"
-            self.trainer.save_checkpoint(str(checkpoint_path))
-            
-            # Save additional model info
-            model_info_path = path / "model_info.pt"
-            torch.save({
-                "input_size": self.input_size,
-                "model_params": self.model_params,
-                "is_trained": self.is_trained
-            }, model_info_path)
-            
-        except Exception as e:
-            logger.error(f"Failed to save Lightning model state: {e}")
-            raise
+
+        # Save Lightning model checkpoint
+        checkpoint_path = path / "lightning_model.ckpt"
+        self.trainer.save_checkpoint(str(checkpoint_path))
+        
+        # Save additional model info
+        model_info_path = path / "model_info.pt"
+        torch.save({
+            "input_size": self.input_size,
+            "model_params": self.model_params,
+            "is_trained": self.is_trained
+        }, model_info_path)
+        
+
             
     def load_state(self, path: Path) -> None:
         """
@@ -344,27 +335,24 @@ class LightningStandardModel(BaseModel):
         Args:
             path: Directory path containing saved model state
         """
-        try:
-            # Load model info
-            model_info_path = path / "model_info.pt"
-            if model_info_path.exists():
-                model_info = torch.load(model_info_path)
-                self.input_size = model_info["input_size"]
-                self.model_params = model_info["model_params"]
-                self.is_trained = model_info["is_trained"]
-            
-            # Load Lightning model
-            checkpoint_path = path / "lightning_model.ckpt"
-            if checkpoint_path.exists():
-                self.lightning_model = ForecastingModel.load_from_checkpoint(
-                    str(checkpoint_path),
-                    input_size=self.input_size,
-                    hidden_size=self.model_params.get("hidden_size", 128),
-                    lr=self.model_params.get("lr", 1e-3),
-                    dropout=self.model_params.get("dropout", 0.2)
-                )
-                self.model = self.lightning_model
+
+        # Load model info
+        model_info_path = path / "model_info.pt"
+        if model_info_path.exists():
+            model_info = torch.load(model_info_path)
+            self.input_size = model_info["input_size"]
+            self.model_params = model_info["model_params"]
+            self.is_trained = model_info["is_trained"]
+        
+        # Load Lightning model
+        checkpoint_path = path / "lightning_model.ckpt"
+        if checkpoint_path.exists():
+            self.lightning_model = ForecastingModel.load_from_checkpoint(
+                str(checkpoint_path),
+                input_size=self.input_size,
+                hidden_size=self.model_params.get("hidden_size", 128),
+                lr=self.model_params.get("lr", 1e-3),
+                dropout=self.model_params.get("dropout", 0.2)
+            )
+            self.model = self.lightning_model
                 
-        except Exception as e:
-            logger.error(f"Failed to load Lightning model state: {e}")
-            raise

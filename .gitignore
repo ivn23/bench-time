@@ -81,5 +81,5 @@ specs/
 artifacts/
 Transformers_code/
 
-specs/*
+specs/
 .serena/*
