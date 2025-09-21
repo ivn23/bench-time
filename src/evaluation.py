@@ -26,18 +26,16 @@ class ModelEvaluator:
     
     def evaluate_training_result(self, 
                              training_result: TrainingResult,
-                             X_test: pl.DataFrame,
-                             y_test: pl.DataFrame) -> TrainingResult:
+                             modeling_dataset) -> TrainingResult:
         """
-        Evaluate a TrainingResult and add computed performance metrics.
+        Evaluate a TrainingResult using the already-prepared test data from ModelingDataset.
         
         This method takes a TrainingResult from training and adds performance metrics
-        by evaluating the model on test data.
+        by evaluating the model on test data that's already prepared in the ModelingDataset.
         
         Args:
             training_result: TrainingResult from training (without test metrics)
-            X_test: Test features DataFrame with bdID column
-            y_test: Test targets DataFrame with bdID column
+            modeling_dataset: ModelingDataset containing prepared X_test and y_test
             
         Returns:
             TrainingResult with computed performance metrics added
@@ -45,29 +43,34 @@ class ModelEvaluator:
         
         logger.info(f"Evaluating trained model: {training_result.model_type}")
         
-        # Use DataLoader for centralized evaluation data preparation
-        X_test_filtered, y_test_filtered = DataLoader.prepare_evaluation_data(X_test, y_test, training_result)
+        # Use data directly from ModelingDataset - it's already prepared!
+        # Convert to model-specific format if needed
+        if "xgboost" in training_result.model_type.lower():
+            X_test_final = modeling_dataset.X_test.to_pandas()
+            y_test_final = modeling_dataset.y_test.to_pandas()[modeling_dataset.target_col]
+        else:
+            X_test_final = modeling_dataset.X_test.to_numpy()
+            y_test_final = modeling_dataset.y_test.to_numpy().flatten()
         
-        if len(X_test_filtered) == 0:
+        if len(X_test_final) == 0:
             logger.warning("No test data found for evaluation")
             raise ValueError("No test data available for evaluation")
         
         # Make predictions using the trained model
-        y_pred = training_result.model.predict(X_test_filtered)
-        #y_pred = np.clip(np.round(y_pred).astype(int), 0, None)
+        y_pred = training_result.model.predict(X_test_final)
         
         # Calculate metrics using centralized metrics calculator
         if training_result.is_quantile_model():
             # Calculate quantile-specific metrics
             metrics = self.metrics_calc.calculate_quantile_metrics(
-                y_true=y_test_filtered,
+                y_true=y_test_final,
                 y_pred=y_pred,
                 quantile_alpha=training_result.quantile_level
             )
         else:
             # Calculate standard regression metrics
             metrics = self.metrics_calc.calculate_regression_metrics(
-                y_true=y_test_filtered,
+                y_true=y_test_final,
                 y_pred=y_pred
             )
         

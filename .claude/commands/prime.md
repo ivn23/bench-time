@@ -4,7 +4,8 @@
 
 ## Run the following command
 
-eza . --tree --all
+> eza . --tree --git-ignore
+> THIS IS THE MAIN SOURCE OF THE PROJECT SSTRUCTURE!! 
 
 ## Get Info on the Project
 > Use serena MCP server to understand the project

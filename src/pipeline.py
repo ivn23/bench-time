@@ -141,13 +141,6 @@ class BenchmarkPipeline:
         # Train the model 
         model_instance.train(X_train, y_train)
         
-        # Get training loss if available
-        training_loss = None
-        if hasattr(model_instance, 'loss_') and model_instance.loss_ is not None:
-            training_loss = float(model_instance.loss_)
-        elif hasattr(model_instance, 'best_score') and model_instance.best_score is not None:
-            training_loss = float(model_instance.best_score)
-        
         # Get split info from dataset
         split_info = dataset.get_split_info()
         
@@ -161,7 +154,6 @@ class BenchmarkPipeline:
             feature_columns=dataset.feature_cols,
             target_column=dataset.target_col,
             split_info=split_info,
-            training_loss=training_loss,
             quantile_level=quantile_alpha
         )
         
@@ -185,9 +177,9 @@ class BenchmarkPipeline:
             # Find corresponding dataset
             dataset = self._find_dataset_for_result(result, datasets)
             
-            # Use the simplified evaluator
+            # Use the simplified evaluator with entire ModelingDataset
             evaluated_result = evaluator.evaluate_training_result(
-                result, dataset.X_test, dataset.y_test
+                result, dataset
             )
             evaluated_results.append(evaluated_result)
             

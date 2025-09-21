@@ -134,7 +134,7 @@ class DataLoader:
         metadata_cols = {
             "frequency", "idx", "bdID", "base_date", "date", "dateID", 
             "skuID", "productID", "storeID", "companyID", "missing_value", 
-            "not_for_sale", "target", "feature_0038", "target_lag_1"
+            "not_for_sale", "target"
         }
         
         # Get all columns except metadata
@@ -166,12 +166,9 @@ class DataLoader:
             self.load_data(lazy=False)
         
         # Filter data for specified SKUs
-        print("features_df after loading",self._features_df.shape)
         features_df, target_df = self._filter_sku_data(sku_tuples, modeling_strategy)
-        print("features_df after sku_filter",self._features_df.shape)
         # Prepare features for modeling
         X, y, feature_cols = self._prepare_features(features_df, target_df)
-        print("features_df after feature preparation",X.shape)
         # Apply temporal splitting with configuration
         X_train, y_train, X_test, y_test, split_info = self._apply_temporal_split(X, y)
         
@@ -201,87 +198,54 @@ class DataLoader:
         )
     
     def _filter_sku_data(self, sku_tuples: SkuList, strategy: ModelingStrategy) -> Tuple[pl.DataFrame, pl.DataFrame]:
-        """Filter data for specified SKUs based on modeling strategy."""
+        """Filter data for specified SKUs using efficient Polars operations."""
         logger.info(f"Filtering data for {len(sku_tuples)} SKUs")
         
-        # Create filter conditions for SKU tuples
-        sku_conditions = []
-        for product_id, store_id in sku_tuples:
-            condition = (pl.col("productID") == product_id) & (pl.col("storeID") == store_id)
-            sku_conditions.append(condition)
-        
-        # Combine conditions with OR
-        if len(sku_conditions) == 1:
-            sku_filter = sku_conditions[0]
+        # For single SKU (INDIVIDUAL strategy common case), use direct filtering
+        if len(sku_tuples) == 1:
+            product_id, store_id = sku_tuples[0]
+            features_filtered = (self._features_df
+                               .filter(pl.col('productID') == product_id)
+                               .filter(pl.col('storeID') == store_id)
+                               .drop_nulls()
+                               .sort("date", "skuID"))
         else:
-            sku_filter = sku_conditions[0]
-            for condition in sku_conditions[1:]:
-                sku_filter = sku_filter | condition
+            # For multiple SKUs (COMBINED strategy), use is_in
+            product_ids = [sku[0] for sku in sku_tuples]
+            store_ids = [sku[1] for sku in sku_tuples]
+            
+            features_filtered = (self._features_df
+                               .filter(pl.col('productID').is_in(product_ids))
+                               .filter(pl.col('storeID').is_in(store_ids))
+                               .drop_nulls()
+                               .sort("date", "skuID"))
         
-        # Apply filtering
-        features_filtered = self._features_df.filter(sku_filter)
+        # Get bdIDs and filter targets - direct operations on DataFrames
+        feature_bdids = (features_filtered
+                        .select('bdID')
+                        .unique()
+                        .to_numpy()
+                        .flatten())
         
-        # Get corresponding target data by joining on bdID
-        feature_bdids = features_filtered.select("bdID").unique()
-        target_filtered = self._target_df.join(feature_bdids, on="bdID", how="inner")
-        
-        # Apply additional filters from config
-        if self.config.remove_not_for_sale:
-            # Assume 'not_for_sale' column exists - filter it out
-            if "not_for_sale" in features_filtered.columns:
-                features_filtered = features_filtered.filter(pl.col("not_for_sale") == False)
-                # Re-filter targets
-                feature_bdids = features_filtered.select("bdID").unique()
-                target_filtered = self._target_df.join(feature_bdids, on="bdID", how="inner")
-        
-        # Apply date range filters
-        if self.config.min_date or self.config.max_date:
-            if self.config.date_column in features_filtered.columns:
-                if self.config.min_date:
-                    features_filtered = features_filtered.filter(pl.col(self.config.date_column) >= self.config.min_date)
-                if self.config.max_date:
-                    features_filtered = features_filtered.filter(pl.col(self.config.date_column) <= self.config.max_date)
-                
-                # Re-filter targets
-                feature_bdids = features_filtered.select("bdID").unique()
-                target_filtered = self._target_df.join(feature_bdids, on="bdID", how="inner")
+        target_filtered = (self._target_df
+                          .filter(pl.col("bdID").is_in(feature_bdids))
+                          .join(features_filtered.select("bdID", "skuID"), 
+                               on="bdID", how="left")
+                          .sort("date", "skuID"))
         
         logger.info(f"Filtered to {len(features_filtered)} samples")
         return features_filtered, target_filtered
     
     def _prepare_features(self, features_df: pl.DataFrame, target_df: pl.DataFrame) -> Tuple[pl.DataFrame, pl.DataFrame, List[str]]:
-        """Prepare features for modeling."""
-        # Join features with targets to ensure alignment
-        df_merged = features_df.join(target_df, on="bdID", how="inner")
+
         
-        # Remove rows with null targets
-        df_clean = df_merged.filter(pl.col(self.config.target_column).is_not_null())
         
-        # Get all columns
-        if hasattr(df_clean, 'columns'):
-            all_cols = set(df_clean.columns)
-        else:
-            all_cols = set(df_clean.schema.keys())
         
-        # Define comprehensive exclusion patterns
-        base_exclude_cols = {
-            self.config.bdid_column, self.config.target_column, 
-            self.config.date_column, "productID", "storeID",
-            "frequency", "idx", "base_date", "dateID", 
-            "skuID", "companyID", "missing_value", 
-            "not_for_sale", "feature_0038", "target_lag_1"
-        }
-        
-        # Also exclude columns with _right suffix (from joins) that are metadata
-        feature_cols = self.get_feature_columns(df_clean)
-        
-        # Prepare X and y with bdID for splitting - date column is only for splitting, not features
-        date_col = self.config.date_column if self.config.date_column in df_clean.columns else None
-        if date_col:
-            X = df_clean.select(["bdID", date_col] + feature_cols)
-        else:
-            X = df_clean.select(["bdID"] + feature_cols)
-        y = df_clean.select(["bdID", self.config.target_column])
+
+        feature_cols = self.get_feature_columns(features_df)
+
+        X = features_df.select(feature_cols + ["bdID","date","skuID"])
+        y = target_df.select([self.config.target_column, "bdID","date","skuID"])
         
         return X, y, feature_cols
     
@@ -306,7 +270,17 @@ class DataLoader:
             "split_method": "date_based" if self.config.split_date else "percentage_based",
             "validation_split": self.config.validation_split if not self.config.split_date else None
         }
-        
+        #sort by date and skuID
+        X_train = X_train.sort("date","skuID")
+        y_train = y_train.sort("date","skuID")
+        X_test = X_test.sort("date","skuID")
+        y_test = y_test.sort("date","skuID")
+        #drop bdid and date columns from X and y
+        X_train = X_train.drop(["bdID","date","skuID"])
+        y_train = y_train.drop(["bdID","date","skuID"])
+        X_test = X_test.drop(["bdID","date","skuID"])
+        y_test = y_test.drop(["bdID","date","skuID"])
+
         return X_train, y_train, X_test, y_test, split_info
     
     # ===================================================================

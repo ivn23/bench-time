@@ -102,13 +102,6 @@ class ModelTrainer:
             X_train_prepared, y_train_prepared, hyperparameters, model_type, quantile_alpha=quantile_alpha
         )
         
-        # Get training loss if available
-        training_loss = None
-        if hasattr(final_model, 'loss_') and final_model.loss_ is not None:
-            training_loss = float(final_model.loss_)
-        elif hasattr(final_model, 'best_score') and final_model.best_score is not None:
-            training_loss = float(final_model.best_score)
-        
         # Get split info from dataset
         split_info = dataset.get_split_info()
         
@@ -122,7 +115,6 @@ class ModelTrainer:
             feature_columns=dataset.feature_cols,
             target_column=dataset.target_col,
             split_info=split_info,
-            training_loss=training_loss,
             quantile_level=quantile_alpha
         )
         
