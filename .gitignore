@@ -15,7 +15,6 @@ envs/
 
 # Data / artifacts
 data/
-models/
 *.sqlite
 *.db
 
@@ -66,8 +65,23 @@ implement/
 src/load_data.ipynb
 
 examples/
+ai_docs/
 
 src/test_code.ipynb
 src/test_pipeline.ipynb
 
 .github
+
+notebooks/
+
+.pytest_cache/
+specs/
+
+.serena/*
+artifacts/
+Transformers_code/
+
+specs/
+.serena/*
+
+lightning_model_releases/
