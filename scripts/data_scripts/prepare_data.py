@@ -31,16 +31,16 @@ df = add_lag_features(
     df,
     lags=range(1, 8),
     group_by_cols=["skuID", "frequency"],
-    value_col="feature_0038",
+    value_col="feature_0038", # actually target variable
     date_col="date"
 )
 
 
-df = df.drop('lag_target_1','feature_0038')
+df = df.drop('lag_target_1','feature_0038') # dopnt drop , but actual target
 df = df.filter(pl.col("not_for_sale") != 1)
 
 df = add_trend_feature(df, date_col="date")
 
 
 #save data
-df.write_ipc("../data/processed/train_data_features.feather") 
+df.write_ipc("../data/db_snapshot_offsite/train_data/processed/train_data_features.feather") 
