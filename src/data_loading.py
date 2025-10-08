@@ -10,6 +10,7 @@ import pickle
 from typing import Dict, List, Optional, Tuple, Any, Union
 from pathlib import Path
 import logging
+import os
 
 from .structures import DataConfig, ModelingStrategy, ModelingDataset, SkuList, TrainingResult
 
@@ -38,6 +39,7 @@ class DataLoader:
         """
         logger.info("Loading M5 dataset...")
         
+
         # Load feature mapping
         with open(self.config.mapping_path, 'rb') as f:
             self._feature_mapping = pickle.load(f)
@@ -134,7 +136,7 @@ class DataLoader:
         metadata_cols = {
             "frequency", "idx", "bdID", "base_date", "date", "dateID", 
             "skuID", "productID", "storeID", "companyID", "missing_value", 
-            "not_for_sale", "target"
+            "not_for_sale", "target", "is_daily", "name", "name-2"
         }
         
         # Get all columns except metadata

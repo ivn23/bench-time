@@ -78,13 +78,10 @@ class MetricsCalculator:
         quantile_metrics = {}
         
         # Quantile loss (pinball loss)
-        residuals = y_true - y_pred
-        quantile_loss = np.where(
-            residuals >= 0,
-            quantile_alpha * residuals,
-            (quantile_alpha - 1) * residuals
-        )
-        quantile_metrics["quantile_score"] = float(np.mean(quantile_loss))
+        #residuals = y_true - y_pred
+        quantile_loss = np.where(y_true >= y_pred, quantile_alpha * (y_true - y_pred), (quantile_alpha - 1) * (y_true - y_pred))
+
+        quantile_metrics["quantile_score"] = quantile_loss
         
         # Coverage probability - proportion of actual values below predicted quantile
         coverage = np.mean(y_true <= y_pred)

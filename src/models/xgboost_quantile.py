@@ -83,7 +83,7 @@ class XGBoostQuantileModel(BaseModel):
             residual = y_true - predt
             
             # Gradient of quantile loss (pinball loss derivative)
-            gradient = np.where(residual >= 0, self.quantile_alpha - 1, self.quantile_alpha)
+            gradient = np.where(residual >= 0, -self.quantile_alpha, 1 - self.quantile_alpha)
             
             # Hessian approximation (constant for stability)
             hessian = np.ones_like(gradient) * 0.1

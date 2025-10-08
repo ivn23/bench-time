@@ -19,6 +19,7 @@ from .structures import (
 from .data_loading import DataLoader
 from .evaluation import ModelEvaluator
 from .model_types import model_registry
+from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,7 @@ class BenchmarkPipeline:
         elif modeling_strategy == ModelingStrategy.INDIVIDUAL:
             # Separate dataset for each SKU
             datasets = []
-            for sku_tuple in sku_tuples:
+            for sku_tuple in tqdm(sku_tuples):
                 dataset = data_loader.prepare_modeling_dataset([sku_tuple], modeling_strategy)
                 datasets.append(dataset)
             return datasets
@@ -105,7 +106,7 @@ class BenchmarkPipeline:
 
         all_results = []
         
-        for i, dataset in enumerate(datasets):
+        for i, dataset in enumerate(tqdm(datasets, desc="Training models")):
             logger.info(f"Training model {i+1}/{len(datasets)} for {len(dataset.sku_tuples)} SKU(s)")
             
             if config.is_quantile_model:
