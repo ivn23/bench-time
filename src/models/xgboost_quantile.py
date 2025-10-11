@@ -27,44 +27,54 @@ class XGBoostQuantileModel(BaseModel):
     def __init__(self, quantile_alphas: List[float] = None, **model_params):
         """
         Initialize XGBoost quantile model.
-        
+
+        Requires explicit configuration - no defaults are provided.
+
         Args:
-            quantile_alphas: List of target quantile levels (e.g., [0.7] for 70% quantile)
-            **model_params: XGBoost hyperparameters
+            quantile_alphas: List of target quantile levels (e.g., [0.7] for 70% quantile).
+                            Must contain exactly one value between 0 and 1.
+            **model_params: XGBoost hyperparameters. Must include either 'n_estimators'
+                          or 'num_boost_round' to specify number of boosting rounds.
+
+        Raises:
+            ValueError: If quantile_alphas is None, empty, contains != 1 value,
+                       or if required parameters are missing.
         """
         super().__init__(**model_params)
+
+        # Validate quantile_alphas is provided
         if quantile_alphas is None:
-            quantile_alphas = [0.7]
-        
+            raise ValueError(
+                "quantile_alphas must be explicitly provided. "
+                "Pass a list with one quantile level, e.g., quantile_alphas=[0.7]"
+            )
+
         if not quantile_alphas or len(quantile_alphas) != 1:
-            raise ValueError("XGBoost quantile model currently supports exactly one quantile level")
-        
-        self.quantile_alpha = quantile_alphas[0]  # Keep internal usage for now
-        self.model_type = "xgboost_quantile"
-        
-        # Set default XGBoost parameters if not provided
-        default_params = {
-            'tree_method': 'hist',
-            'max_depth': 6,
-            'learning_rate': 0.3,
-            'subsample': 1.0,
-            'colsample_bytree': 1.0,
-            'reg_alpha': 0.0,
-            'reg_lambda': 1.0,
-            'random_state': 42
-        }
-        
-        # Handle n_estimators separately (will be converted to num_boost_round in train())
-        # Remove it from model_params to avoid the warning
-        if 'n_estimators' in self.model_params:
+            raise ValueError(
+                "XGBoost quantile model currently supports exactly one quantile level. "
+                f"Got {len(quantile_alphas) if quantile_alphas else 0} values."
+            )
+
+        self.quantile_alpha = quantile_alphas[0]  # Single quantile per model instance
+
+        # Validate quantile_alpha is in valid range
+        if not 0 < self.quantile_alpha < 1:
+            raise ValueError(
+                f"quantile_alpha must be between 0 and 1 (exclusive), got {self.quantile_alpha}"
+            )
+
+        # Handle n_estimators/num_boost_round extraction
+        # Must be provided explicitly - no defaults
+        # These control training iterations, not tree parameters, so remove from model_params
+        if 'num_boost_round' in self.model_params:
+            self.n_estimators = self.model_params.pop('num_boost_round')
+        elif 'n_estimators' in self.model_params:
             self.n_estimators = self.model_params.pop('n_estimators')
         else:
-            self.n_estimators = 100  # default value
-        
-        # Update with provided parameters
-        for key, value in default_params.items():
-            if key not in self.model_params:
-                self.model_params[key] = value
+            raise ValueError(
+                "Either 'n_estimators' or 'num_boost_round' must be provided in model parameters. "
+                "These specify the number of boosting rounds for training."
+            )
     
     def _create_quantile_objective(self):
         """
@@ -86,13 +96,13 @@ class XGBoostQuantileModel(BaseModel):
             gradient = np.where(residual >= 0, -self.quantile_alpha, 1 - self.quantile_alpha)
             
             # Hessian approximation (constant for stability)
-            hessian = np.ones_like(gradient) * 0.1
+            hessian = np.ones_like(gradient) * 1 
             
             return gradient, hessian
         
         return objective
         
-    def train(self, X_train: np.ndarray, y_train: np.ndarray, **training_kwargs) -> None:
+    def train(self, X_train: np.ndarray, y_train: np.ndarray) -> None:
         """
         Train the quantile XGBoost model using custom objective.
         
@@ -108,9 +118,6 @@ class XGBoostQuantileModel(BaseModel):
         # Use n_estimators stored during initialization as num_boost_round
         num_boost_round = self.n_estimators
         
-        # Override with explicit num_boost_round if provided in training_kwargs
-        if 'num_boost_round' in training_kwargs:
-            num_boost_round = training_kwargs.pop('num_boost_round')
         
         # Create quantile objective function
         quantile_objective = self._create_quantile_objective()
@@ -151,17 +158,17 @@ class XGBoostQuantileModel(BaseModel):
     def get_model_info(self) -> Dict[str, Any]:
         """
         Get model information and metadata.
-        
+
         Returns:
             Dictionary containing model type, parameters, and quantile-specific info
         """
         info = {
-            "model_type": self.model_type,
+            "model_type": self.MODEL_TYPE,
             "parameters": self.model_params,
             "quantile_alpha": self.quantile_alpha,
             "is_trained": self.is_trained,
             "model_class": "XGBQuantileModel",
             "training_method": "xgb_train_custom_objective"
         }
-        
+
         return info

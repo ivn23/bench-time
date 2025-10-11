@@ -78,22 +78,11 @@ class MetricsCalculator:
         quantile_metrics = {}
         
         # Quantile loss (pinball loss)
-        #residuals = y_true - y_pred
-        quantile_loss = np.where(y_true >= y_pred, quantile_alpha * (y_true - y_pred), (quantile_alpha - 1) * (y_true - y_pred))
+        quantile_loss = np.where(y_true >= y_pred.round(), quantile_alpha * (y_true - y_pred.round()), (quantile_alpha - 1) * (y_true - y_pred.round()))
 
         quantile_metrics["quantile_score"] = quantile_loss
-        
-        # Coverage probability - proportion of actual values below predicted quantile
-        coverage = np.mean(y_true <= y_pred)
-        quantile_metrics["coverage_probability"] = float(coverage)
-        
-        # Coverage error - difference between actual and target coverage
-        coverage_error = abs(coverage - quantile_alpha)
-        quantile_metrics["coverage_error"] = float(coverage_error)
-        
-        # Store quantile alpha for reference
-        quantile_metrics["quantile_alpha"] = float(quantile_alpha)
-        
+        quantile_metrics["predictions"] = y_pred.round()
+
         return quantile_metrics
     
     @staticmethod
