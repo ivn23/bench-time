@@ -47,52 +47,72 @@ class TestXGBoostQuantileModel:
         
     def test_model_initialization(self):
         """Test quantile model initialization."""
-        model = XGBoostQuantileModel(quantile_alpha=0.7, max_depth=4)
-        
+        model = XGBoostQuantileModel(
+            quantile_alphas=[0.7],
+            max_depth=4,
+            n_estimators=10
+        )
+
         assert model.quantile_alpha == 0.7
-        assert model.model_type == "xgboost_quantile"
         assert model.model_params['max_depth'] == 4
+        assert model.n_estimators == 10
         assert not model.is_trained
         
     def test_model_training(self, sample_data):
         """Test quantile model training."""
         X, y = sample_data
-        model = XGBoostQuantileModel(quantile_alpha=0.7)
-        
+        model = XGBoostQuantileModel(
+            quantile_alphas=[0.7],
+            n_estimators=10,
+            max_depth=3
+        )
+
         # Train the model
-        model.train(X, y, num_boost_round=10)
-        
+        model.train(X, y)
+
         assert model.is_trained
         assert model.model is not None
         
     def test_model_prediction(self, sample_data):
         """Test quantile model prediction."""
         X, y = sample_data
-        model = XGBoostQuantileModel(quantile_alpha=0.7)
-        
+        model = XGBoostQuantileModel(
+            quantile_alphas=[0.7],
+            n_estimators=10,
+            max_depth=3
+        )
+
         # Train then predict
-        model.train(X, y, num_boost_round=10)
+        model.train(X, y)
         predictions = model.predict(X)
-        
+
         assert len(predictions) == len(y)
         assert isinstance(predictions, np.ndarray)
         
     def test_prediction_without_training_raises_error(self, sample_data):
         """Test that prediction without training raises error."""
         X, y = sample_data
-        model = XGBoostQuantileModel(quantile_alpha=0.7)
-        
+        model = XGBoostQuantileModel(
+            quantile_alphas=[0.7],
+            n_estimators=10,
+            max_depth=3
+        )
+
         with pytest.raises(ModelPredictionError):
             model.predict(X)
             
     def test_model_info(self, sample_data):
         """Test model info generation."""
         X, y = sample_data
-        model = XGBoostQuantileModel(quantile_alpha=0.7, max_depth=6)
-        model.train(X, y, num_boost_round=10)
-        
+        model = XGBoostQuantileModel(
+            quantile_alphas=[0.7],
+            max_depth=6,
+            n_estimators=10
+        )
+        model.train(X, y)
+
         info = model.get_model_info()
-        
+
         assert info["model_type"] == "xgboost_quantile"
         assert info["quantile_alpha"] == 0.7
         assert info["is_trained"] is True
@@ -101,8 +121,12 @@ class TestXGBoostQuantileModel:
     def test_quantile_evaluation_metrics(self, sample_data):
         """Test quantile-specific evaluation metrics."""
         X, y = sample_data
-        model = XGBoostQuantileModel(quantile_alpha=0.7)
-        model.train(X, y, num_boost_round=10)
+        model = XGBoostQuantileModel(
+            quantile_alphas=[0.7],
+            n_estimators=10,
+            max_depth=3
+        )
+        model.train(X, y)
         
         predictions = model.predict(X)
         metrics = model.get_evaluation_metrics(y, predictions)
@@ -125,8 +149,12 @@ class TestXGBoostQuantileModel:
     def test_coverage_probability_calculation(self, sample_data):
         """Test that coverage probability is reasonable for quantile predictions."""
         X, y = sample_data
-        model = XGBoostQuantileModel(quantile_alpha=0.7)
-        model.train(X, y, num_boost_round=50)  # More rounds for better calibration
+        model = XGBoostQuantileModel(
+            quantile_alphas=[0.7],
+            n_estimators=50,
+            max_depth=3
+        )
+        model.train(X, y)  # More rounds for better calibration
         
         predictions = model.predict(X)
         metrics = model.get_evaluation_metrics(y, predictions)
@@ -136,7 +164,53 @@ class TestXGBoostQuantileModel:
         # Note: On small synthetic data, perfect calibration is not expected
         assert 0.0 <= coverage <= 1.0, f"Coverage {coverage} not in valid range [0, 1]"
         assert abs(coverage - 0.7) < 0.5, f"Coverage {coverage} too far from target 0.7"
-        
+
+    def test_missing_quantile_alphas_raises_error(self):
+        """Test that missing quantile_alphas raises ValueError."""
+        with pytest.raises(ValueError, match="quantile_alphas must be explicitly provided"):
+            XGBoostQuantileModel(quantile_alphas=None, n_estimators=10, max_depth=3)
+
+    def test_empty_quantile_alphas_raises_error(self):
+        """Test that empty quantile_alphas list raises ValueError."""
+        with pytest.raises(ValueError, match="exactly one quantile level"):
+            XGBoostQuantileModel(quantile_alphas=[], n_estimators=10, max_depth=3)
+
+    def test_multiple_quantile_alphas_raises_error(self):
+        """Test that multiple quantile levels raise ValueError."""
+        with pytest.raises(ValueError, match="exactly one quantile level"):
+            XGBoostQuantileModel(quantile_alphas=[0.5, 0.7, 0.9], n_estimators=10, max_depth=3)
+
+    def test_quantile_alpha_out_of_range_low_raises_error(self):
+        """Test that quantile_alpha <= 0 raises ValueError."""
+        with pytest.raises(ValueError, match="must be between 0 and 1"):
+            XGBoostQuantileModel(quantile_alphas=[0.0], n_estimators=10, max_depth=3)
+
+        with pytest.raises(ValueError, match="must be between 0 and 1"):
+            XGBoostQuantileModel(quantile_alphas=[-0.5], n_estimators=10, max_depth=3)
+
+    def test_quantile_alpha_out_of_range_high_raises_error(self):
+        """Test that quantile_alpha >= 1 raises ValueError."""
+        with pytest.raises(ValueError, match="must be between 0 and 1"):
+            XGBoostQuantileModel(quantile_alphas=[1.0], n_estimators=10, max_depth=3)
+
+        with pytest.raises(ValueError, match="must be between 0 and 1"):
+            XGBoostQuantileModel(quantile_alphas=[1.5], n_estimators=10, max_depth=3)
+
+    def test_missing_n_estimators_raises_error(self):
+        """Test that missing n_estimators/num_boost_round raises ValueError."""
+        with pytest.raises(ValueError, match="Either 'n_estimators' or 'num_boost_round' must be provided"):
+            XGBoostQuantileModel(quantile_alphas=[0.7], max_depth=3)
+
+    def test_num_boost_round_parameter_works(self):
+        """Test that num_boost_round can be used instead of n_estimators."""
+        model = XGBoostQuantileModel(
+            quantile_alphas=[0.7],
+            num_boost_round=20,
+            max_depth=3
+        )
+        assert model.n_estimators == 20
+        assert 'num_boost_round' not in model.model_params  # Should be popped
+
 
 class TestXGBoostStandardModel:
     """Test standard XGBoost model implementation."""
