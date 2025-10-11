@@ -20,6 +20,7 @@ from .model_training import ModelTrainer
 from .evaluation import ModelEvaluator
 from .pipeline import BenchmarkPipeline
 from .release_management import ReleaseManager
+from .hyperparameter_tuning import HyperparameterTuner, TuningResult
 
 __version__ = "2.0.0"
 __author__ = "M5 Benchmarking Team"
@@ -48,5 +49,7 @@ __all__ = [
     "ModelTrainer",
     "ModelEvaluator",
     "BenchmarkPipeline",
-    "ReleaseManager"
+    "ReleaseManager",
+    "HyperparameterTuner",
+    "TuningResult"
 ]
