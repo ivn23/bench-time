@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Tuple
 
-from src import DataConfig, ModelTypeConfig, ModelingStrategy
+from src import DataConfig, ModelConfig, ModelingStrategy
 from tests.fixtures.sample_data import (
     generate_sample_features_data,
     generate_sample_target_data, 
@@ -84,7 +84,7 @@ def sample_model_config():
             "n_estimators": 10,  # Small for fast testing
             "max_depth": 3,
             "learning_rate": 0.1,
-            "random_state": 42,
+            "seed": 42,
             "n_jobs": 1  # Pin parallelism for reproducible tests
         }
     )
@@ -152,7 +152,7 @@ def sample_quantile_model_config():
             "n_estimators": 10,  # Small for fast testing
             "max_depth": 3,
             "learning_rate": 0.1,
-            "random_state": 42,
+            "seed": 42,
             "n_jobs": 1
         },
         quantile_alphas=[0.1, 0.5, 0.9]  # Multi-quantile configuration

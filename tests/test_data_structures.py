@@ -26,7 +26,7 @@ def sample_model_metadata():
         sku_tuples=[(80558, 2)],
         model_type="xgboost",
         hyperparameters={"n_estimators": 100},
-        training_config={"random_state": 42},
+        training_config={"seed": 42},
         performance_metrics={"mse": 0.8},
         feature_columns=["feature1", "feature2"],
         target_column="target"
@@ -96,7 +96,7 @@ class TestModelMetadata:
             sku_tuples=[(80558, 2)],
             model_type="xgboost",
             hyperparameters={"n_estimators": 100, "max_depth": 6},
-            training_config={"random_state": 42, "validation_split": 0.2},
+            training_config={"seed": 42, "validation_split": 0.2},
             performance_metrics={"mse": 0.5, "rmse": 0.707, "mae": 0.4},
             feature_columns=["feature1", "feature2", "feature3"],
             target_column="target"
@@ -118,7 +118,7 @@ class TestModelMetadata:
             sku_tuples=[(80558, 2), (80651, 5)],
             model_type="xgboost",
             hyperparameters={"n_estimators": 50},
-            training_config={"random_state": 42},
+            training_config={"seed": 42},
             performance_metrics={"mse": 1.2},
             feature_columns=["feature1"],
             target_column="target"
@@ -245,7 +245,7 @@ class TestBenchmarkModel:
             sku_tuples=[(80558, 2)],
             model_type="xgboost",
             hyperparameters={"n_estimators": 100},
-            training_config={"random_state": 42},
+            training_config={"seed": 42},
             performance_metrics={"mse": 0.8},
             feature_columns=["feature1", "feature2"],
             target_column="target"

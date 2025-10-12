@@ -80,8 +80,9 @@ class MetricsCalculator:
         # Quantile loss (pinball loss)
         quantile_loss = np.where(y_true >= y_pred.round(), quantile_alpha * (y_true - y_pred.round()), (quantile_alpha - 1) * (y_true - y_pred.round()))
 
-        quantile_metrics["quantile_score"] = quantile_loss
+        quantile_metrics["quantile_losses"] = quantile_loss
         quantile_metrics["predictions"] = y_pred.round()
+        quantile_metrics["mean_quantile_loss"] = quantile_loss.mean()
 
         return quantile_metrics
     

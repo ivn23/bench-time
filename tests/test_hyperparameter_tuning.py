@@ -10,7 +10,7 @@ import numpy as np
 from src import BenchmarkPipeline, DataConfig, ModelingStrategy
 from src.hyperparameter_tuning import HyperparameterTuner, TuningResult
 from src.data_loading import DataLoader
-from src.data_structures import ExperimentResults
+from src.structures import ExperimentResults
 
 
 @pytest.fixture
@@ -123,9 +123,9 @@ class TestHyperparameterTuner:
 
         params = tuner._get_search_space(trial, 'xgboost_standard')
 
-        # Check that random_state is used (not seed)
-        assert 'random_state' in params
-        assert params['random_state'] == 42
+        # Check that seed is used (matching native XGBoost API)
+        assert 'seed' in params
+        assert params['seed'] == 42
 
     def test_calculate_loss_quantile(self):
         """Test quantile loss calculation."""
