@@ -1,92 +1,114 @@
 """
 Standard XGBoost regression model implementation.
 
-This module implements the standard XGBoost regressor using the sklearn-style interface.
+This module implements the standard XGBoost regressor using the native XGBoost API
+(xgb.train with DMatrix) for consistency with XGBoostQuantileModel.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 import numpy as np
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import xgboost as xgb
 
-from .base import BaseModel, ModelTrainingError, ModelPredictionError
+from .base import BaseModel, ModelPredictionError
 
 
 class XGBoostStandardModel(BaseModel):
     """
-    Standard XGBoost regression model using sklearn-style interface.
-    
-    This implementation conforms to the BaseModel interface for consistent
-    model handling throughout the framework.
+    Standard XGBoost regression model using native XGBoost API.
+
+    This implementation uses xgb.train() with DMatrix for consistency with
+    XGBoostQuantileModel and to enable advanced XGBoost features.
     """
-    
+
     MODEL_TYPE = "xgboost_standard"
-    DESCRIPTION = "Standard XGBoost regression model"
-    
+    DESCRIPTION = "Standard XGBoost regression model with native API"
+
     def __init__(self, **model_params):
         """
         Initialize XGBoost standard model.
-        
+
+        Requires explicit configuration - no defaults are provided.
+
         Args:
-            **model_params: XGBoost hyperparameters
+            **model_params: XGBoost hyperparameters. Must include either 'n_estimators'
+                          or 'num_boost_round' to specify number of boosting rounds.
+
+        Raises:
+            ValueError: If required parameters are missing.
         """
         super().__init__(**model_params)
-        self.model_type = "xgboost"
-        
+
+        # Handle n_estimators/num_boost_round extraction
+        # Must be provided explicitly - no defaults
+        # These control training iterations, not tree parameters, so remove from model_params
+        if 'num_boost_round' in self.model_params:
+            self.n_estimators = self.model_params.pop('num_boost_round')
+        elif 'n_estimators' in self.model_params:
+            self.n_estimators = self.model_params.pop('n_estimators')
+        else:
+            raise ValueError(
+                "Either 'n_estimators' or 'num_boost_round' must be provided in model parameters. "
+                "These specify the number of boosting rounds for training."
+            )
+
     def train(self, X_train: np.ndarray, y_train: np.ndarray) -> None:
         """
-        Train the XGBoost model.
-        
+        Train the XGBoost model using native API.
+
         Args:
             X_train: Training features
             y_train: Training targets
         """
-        # Create XGBoost regressor with parameters
-        self.model = xgb.XGBRegressor(**self.model_params)
-        
-        # Train the model
-        self.model.fit(X_train, y_train)
-        
+        # Create DMatrix for training data
+        dtrain = xgb.DMatrix(X_train, label=y_train)
+
+        # Use n_estimators stored during initialization as num_boost_round
+        num_boost_round = self.n_estimators
+
+        # Train model with native API
+        self.model = xgb.train(
+            params=self.model_params,
+            dtrain=dtrain,
+            num_boost_round=num_boost_round,
+            verbose_eval=False
+        )
+
         self.is_trained = True
-         
+
     def predict(self, X: np.ndarray) -> np.ndarray:
         """
         Make predictions using the trained model.
-        
+
         Args:
             X: Features for prediction
-            
+
         Returns:
             Array of predictions
-            
+
         Raises:
             ModelPredictionError: If model is not trained or prediction fails
         """
         if not self.is_trained:
             raise ModelPredictionError("Model must be trained before making predictions")
-            
-        return self.model.predict(X)
-            
+
+        # Create DMatrix for prediction
+        dtest = xgb.DMatrix(X)
+        return self.model.predict(dtest)
+
     def get_model_info(self) -> Dict[str, Any]:
         """
         Get model information and metadata.
-        
+
         Returns:
             Dictionary containing model type, parameters, and other metadata
         """
         info = {
-            "model_type": self.model_type,
+            "model_type": self.MODEL_TYPE,
             "parameters": self.model_params,
             "is_trained": self.is_trained,
-            "model_class": "XGBRegressor",
-            "training_method": "sklearn_fit"
+            "model_class": "XGBBooster",
+            "training_method": "xgb_train",
+            "num_boost_round": self.n_estimators
         }
-        
-        if self.is_trained and self.model is not None:
-            info.update({
-                "n_estimators": self.model.n_estimators,
-                "max_depth": self.model.max_depth,
-                "learning_rate": self.model.learning_rate
-            })
-            
+
         return info

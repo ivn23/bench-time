@@ -37,7 +37,7 @@ def test_basic_pipeline_workflow():
             hyperparameters={
                 "n_estimators": 5,  # Minimal for fast testing
                 "max_depth": 2,
-                "random_state": 42
+                "seed": 42
             }
         )
         

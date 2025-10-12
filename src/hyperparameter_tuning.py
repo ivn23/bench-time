@@ -219,7 +219,7 @@ class HyperparameterTuner:
                 'reg_alpha': trial.suggest_float('reg_alpha', 0.0, 10.0),
                 'reg_lambda': trial.suggest_float('reg_lambda', 0.1, 10.0),
                 'n_estimators': trial.suggest_int('n_estimators', 50, 300),
-                'random_state': self.random_state
+                'seed': self.random_state
             }
 
         else:

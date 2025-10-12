@@ -51,7 +51,7 @@ results = pipeline.run_experiment(
     hyperparameters={
         "n_estimators": 100,
         "max_depth": 6,
-        "random_state": 42
+        "seed": 42
     },
     experiment_name="combined_experiment"
 )
@@ -72,7 +72,7 @@ results = pipeline.run_experiment(
     hyperparameters={
         "n_estimators": 100,
         "max_depth": 6,
-        "random_state": 42
+        "seed": 42
     },
     experiment_name="individual_experiment"
 )
@@ -96,7 +96,7 @@ results = pipeline.run_experiment(
         "n_estimators": 100,
         "max_depth": 6,
         "quantile_alpha": 0.1,  # 10th percentile
-        "random_state": 42
+        "seed": 42
     },
     experiment_name="quantile_experiment"
 )
@@ -119,7 +119,7 @@ results = pipeline.run_experiment(
     hyperparameters={
         "n_estimators": 100,
         "max_depth": 6,
-        "random_state": 42
+        "seed": 42
     },
     quantile_alphas=[0.1, 0.5, 0.9],  # Multiple quantile levels
     experiment_name="multi_quantile_experiment"

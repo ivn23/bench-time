@@ -36,7 +36,7 @@ class TestPipelineIntegration:
             hyperparameters={
                 "n_estimators": 10,
                 "max_depth": 3,
-                "random_state": 42
+                "seed": 42
             },
             experiment_name="test_combined"
         )
@@ -98,7 +98,7 @@ class TestPipelineIntegration:
             hyperparameters={
                 "n_estimators": 10,
                 "max_depth": 3,
-                "random_state": 42
+                "seed": 42
             },
             experiment_name="test_individual"
         )
