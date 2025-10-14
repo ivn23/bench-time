@@ -13,9 +13,11 @@ from typing import Dict, Any, Optional, List, Tuple
 import optuna
 from sklearn.model_selection import KFold
 
+
 from .structures import ModelingDataset
 from .model_types import model_registry
 
+optuna.logging.set_verbosity(optuna.logging.WARNING) 
 logger = logging.getLogger(__name__)
 
 
@@ -127,7 +129,7 @@ class HyperparameterTuner:
 
         # Run optimization
         logger.info(f"Starting optimization: {n_trials} trials...")
-        study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
+        study.optimize(objective, n_trials=n_trials, n_jobs=8, show_progress_bar=False)
 
         optimization_time = time.time() - start_time
 
@@ -160,6 +162,9 @@ class HyperparameterTuner:
         # Convert Polars DataFrames to numpy
         X_train = dataset.X_train.to_numpy()
         y_train = dataset.y_train.to_numpy().flatten()
+
+        print(f"Prepared training data with {X_train.shape[0]} samples and {X_train.shape[1]} features.")
+
 
         return X_train, y_train
 
