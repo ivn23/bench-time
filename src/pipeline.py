@@ -173,7 +173,9 @@ class BenchmarkPipeline:
             ModelingStrategy.COMBINED  # Always COMBINED for tuning
         )
         logger.info(f"Created tuning dataset: {tuning_dataset.n_train_samples} train samples, {tuning_dataset.n_features} features")
-        
+        print(f"Tuning dataset has {tuning_dataset.n_train_samples} training samples and {tuning_dataset.n_features} features.")
+
+
         # Step 3: Setup tuning configuration
         config = tuning_config or {}
         n_trials = config.get('n_trials', 50)

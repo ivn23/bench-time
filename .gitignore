@@ -91,3 +91,7 @@ pipeline_test_executed.ipynb
 
 
 pytest.ini
+data.zip
+
+xgb_releases_hp/
+xgb_releases_hp_full/
