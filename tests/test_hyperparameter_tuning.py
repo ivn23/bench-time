@@ -152,6 +152,39 @@ class TestHyperparameterTuner:
         expected_mse = np.mean((y_true - y_pred) ** 2)
         assert np.isclose(loss, expected_mse)
 
+    def test_search_space_lightning_standard(self):
+        """Test search space definition for Lightning standard model."""
+        import optuna
+        tuner = HyperparameterTuner(random_state=42)
+
+        study = optuna.create_study()
+        trial = study.ask()
+
+        params = tuner._get_search_space(trial, 'lightning_standard')
+
+        # Check that Lightning-specific parameters are present
+        expected_params = ['hidden_size', 'lr', 'dropout', 'max_epochs', 'batch_size', 'random_state']
+        for param in expected_params:
+            assert param in params
+
+        # Verify num_workers is fixed at 0 for tuning
+        assert params['num_workers'] == 0
+
+    def test_search_space_lightning_quantile(self):
+        """Test search space definition for Lightning quantile model."""
+        import optuna
+        tuner = HyperparameterTuner(random_state=42)
+
+        study = optuna.create_study()
+        trial = study.ask()
+
+        params = tuner._get_search_space(trial, 'lightning_quantile')
+
+        # Check that Lightning-specific parameters are present
+        expected_params = ['hidden_size', 'lr', 'dropout', 'max_epochs', 'batch_size', 'random_state']
+        for param in expected_params:
+            assert param in params
+
 
 class TestPipelineTuningMode:
     """Tests for pipeline integration with tuning mode."""

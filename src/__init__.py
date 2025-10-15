@@ -9,7 +9,7 @@ This version uses clean, focused data structures for streamlined functionality.
 
 # Data structures and core functionality
 from .structures import (
-    ModelingStrategy, SkuTuple, SkuList, DataConfig, ModelingDataset,
+    ModelingStrategy, SkuTuple, SkuList, DataConfig, ComputeConfig, ModelingDataset,
     ModelConfig, SplitInfo, TrainingResult, ExperimentResults,
     create_config, validate_sku_tuples, validate_modeling_strategy
 )
@@ -28,11 +28,12 @@ __author__ = "M5 Benchmarking Team"
 __all__ = [
     # Core types
     "ModelingStrategy",
-    "SkuTuple", 
+    "SkuTuple",
     "SkuList",
-    
+
     # Data structures
     "DataConfig",
+    "ComputeConfig",
     "ModelingDataset",
     "ModelConfig",
     "SplitInfo",

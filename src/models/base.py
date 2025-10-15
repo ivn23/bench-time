@@ -115,21 +115,54 @@ class BaseModel(ABC):
     def get_evaluation_metrics(self, y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
         """
         Calculate evaluation metrics for model predictions.
-        
+
         Args:
             y_true: True target values
             y_pred: Model predictions
-            
+
         Returns:
             Dictionary containing evaluation metrics
         """
         from ..metrics import MetricsCalculator
-        
+
         # Check if this is a quantile model
         quantile_alpha = getattr(self, 'quantile_alpha', None)
-        
+
         return MetricsCalculator.calculate_all_metrics(
             y_true, y_pred, quantile_alpha=quantile_alpha
+        )
+
+    @staticmethod
+    def get_search_space(trial, random_state: int) -> Dict[str, Any]:
+        """
+        Define the hyperparameter search space for this model type.
+
+        This method should be implemented by model classes that support hyperparameter
+        tuning. It receives an Optuna trial object and should return a dictionary of
+        hyperparameters using trial.suggest_* methods.
+
+        Args:
+            trial: Optuna trial object for suggesting hyperparameters
+            random_state: Random seed for reproducibility
+
+        Returns:
+            Dictionary of hyperparameters sampled from the search space
+
+        Raises:
+            NotImplementedError: If the model does not support hyperparameter tuning
+
+        Example:
+            @staticmethod
+            def get_search_space(trial, random_state: int) -> Dict[str, Any]:
+                return {
+                    'learning_rate': trial.suggest_float('learning_rate', 1e-5, 1e-2, log=True),
+                    'max_depth': trial.suggest_int('max_depth', 3, 10),
+                    'seed': random_state
+                }
+        """
+        raise NotImplementedError(
+            "Model does not support hyperparameter tuning. "
+            "Implement get_search_space() method in the model class to enable tuning."
         )
 
 
