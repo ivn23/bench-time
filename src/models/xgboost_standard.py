@@ -112,3 +112,28 @@ class XGBoostStandardModel(BaseModel):
         }
 
         return info
+
+    @staticmethod
+    def get_search_space(trial, random_state: int) -> Dict[str, Any]:
+        """
+        Define hyperparameter search space for XGBoost standard model.
+
+        Args:
+            trial: Optuna trial object for suggesting hyperparameters
+            random_state: Random seed for reproducibility
+
+        Returns:
+            Dictionary of hyperparameters sampled from the search space
+        """
+        return {
+            'eta': trial.suggest_float('eta', 0.01, 0.3),
+            'max_depth': trial.suggest_int('max_depth', 3, 10),
+            'min_child_weight': trial.suggest_int('min_child_weight', 1, 30),
+            'subsample': trial.suggest_float('subsample', 0.6, 1.0),
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
+            'gamma': trial.suggest_float('gamma', 0.0, 5.0),
+            'reg_alpha': trial.suggest_float('reg_alpha', 0.0, 10.0),
+            'reg_lambda': trial.suggest_float('reg_lambda', 0.1, 10.0),
+            'n_estimators': trial.suggest_int('n_estimators', 50, 300),
+            'seed': random_state
+        }

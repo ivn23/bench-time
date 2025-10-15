@@ -16,6 +16,7 @@ from torch.utils.data import DataLoader, TensorDataset
 import lightning as L
 
 from .base import BaseModel, ModelPredictionError
+from ..structures import ComputeConfig
 
 logger = logging.getLogger(__name__)
 
@@ -167,43 +168,45 @@ class LightningQuantileModel(BaseModel):
     def _create_data_loader(self, X: np.ndarray, y: np.ndarray, shuffle: bool = False) -> DataLoader:
         """
         Create PyTorch DataLoader from numpy arrays.
-        
+
         Args:
             X: Features
             y: Targets
             shuffle: Whether to shuffle data
-            
+
         Returns:
             DataLoader instance
         """
         X_tensor, y_tensor = self._convert_to_tensors(X, y)
         dataset = TensorDataset(X_tensor, y_tensor)
-        
-        # Get batch size and num_workers from model params
+
+        # Get batch size from model params, num_workers from compute config
         batch_size = self.model_params.get("batch_size", 64)
-        num_workers = self.model_params.get("num_workers", 0)
-        
+
         return DataLoader(
             dataset,
             batch_size=batch_size,
             shuffle=shuffle,
-            num_workers=num_workers,
+            num_workers=self.compute_config.dataloader_workers,
             persistent_workers=False  # Safer default
         )
         
-    def train(self, X_train: np.ndarray, y_train: np.ndarray, **training_kwargs) -> None:
+    def train(self, X_train: np.ndarray, y_train: np.ndarray, compute_config: ComputeConfig, **training_kwargs) -> None:
         """
         Train the Lightning quantile model using all provided training data.
-        
+
         Args:
             X_train: Training features
             y_train: Training targets
+            compute_config: Compute resource configuration
             **training_kwargs: Additional training parameters
-        
+
         Note:
             This method uses all provided training data for quantile regression training without internal splits.
             The framework handles proper train/test separation at a higher level.
         """
+        # Store compute config
+        self.compute_config = compute_config
 
         # Store input size for model architecture
         self.input_size = X_train.shape[1]
@@ -229,7 +232,10 @@ class LightningQuantileModel(BaseModel):
             "log_every_n_steps": max(10, len(train_loader) // 5),  # Adaptive logging
             "enable_checkpointing": False,  # Disable checkpointing for simplicity
             "logger": False,  # Disable logging for cleaner output
-            "enable_progress_bar": False  # Disable progress bar for cleaner output
+            "enable_progress_bar": False,  # Disable progress bar for cleaner output
+            "accelerator": compute_config.accelerator,  # Use configured accelerator
+            "strategy": "auto",  # Single-process strategy
+            "enable_model_summary": False  # Reduce output verbosity
         }
         
         # Add any additional trainer kwargs from training_kwargs
@@ -395,4 +401,25 @@ class LightningQuantileModel(BaseModel):
                 dropout=self.model_params.get("dropout", 0.2)
             )
             self.model = self.lightning_model
+
+    @staticmethod
+    def get_search_space(trial, random_state: int) -> Dict[str, Any]:
+        """
+        Define hyperparameter search space for Lightning quantile model.
+
+        Args:
+            trial: Optuna trial object for suggesting hyperparameters
+            random_state: Random seed for reproducibility
+
+        Returns:
+            Dictionary of hyperparameters sampled from the search space
+        """
+        return {
+            'hidden_size': trial.suggest_int('hidden_size', 32, 512, step=32),
+            'lr': trial.suggest_float('lr', 1e-5, 1e-2, log=True),
+            'dropout': trial.suggest_float('dropout', 0.0, 0.5),
+            'max_epochs': trial.suggest_int('max_epochs', 10, 30),
+            'batch_size': trial.suggest_categorical('batch_size', [32, 64, 128, 256]),
+            'random_state': random_state
+        }
                 

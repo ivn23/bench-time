@@ -122,7 +122,7 @@ for i, hp in enumerate(hp_list, start=1):
     pipeline = BenchmarkPipeline(data_config)
 
     results = pipeline.run_experiment(
-        sku_tuples= sku_tuples_complete[0:10],
+        sku_tuples= sku_tuples_complete,
         modeling_strategy=ModelingStrategy.INDIVIDUAL,
         model_type="xgboost_quantile",
         quantile_alphas=quantiles,
@@ -160,7 +160,7 @@ experiment_results = pl.concat(results_dfs, how="vertical")
 
 logger.info("="*80)
 logger.info("Saving results to myexp.csv")
-experiment_results.write_csv("zzz_results/myexp.csv", separator=",", include_header=True)
+experiment_results.write_csv("xgb_quantile_hp_all", separator=",", include_header=True)
 logger.info(f"✓ Results saved: {len(experiment_results)} rows")
 logger.info("="*80)
 logger.info("ALL EXPERIMENTS COMPLETED SUCCESSFULLY")

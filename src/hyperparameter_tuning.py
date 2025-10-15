@@ -14,10 +14,9 @@ import optuna
 from sklearn.model_selection import KFold
 
 
-from .structures import ModelingDataset
+from .structures import ModelingDataset, ComputeConfig
 from .model_types import model_registry
 
-optuna.logging.set_verbosity(optuna.logging.WARNING) 
 logger = logging.getLogger(__name__)
 
 
@@ -76,14 +75,17 @@ class HyperparameterTuner:
     ModelingDataset objects using only training data for CV-based optimization.
     """
 
-    def __init__(self, random_state: int = 42):
+    def __init__(self, random_state: int, compute_config: ComputeConfig):
         """Initialize the tuner.
 
         Args:
             random_state: Random seed for reproducibility
+            compute_config: Compute resource configuration
         """
         self.random_state = random_state
+        self.compute_config = compute_config
         logger.info(f"HyperparameterTuner initialized with random_state={random_state}")
+        logger.info(f"Optuna parallelism: {compute_config.optuna_n_jobs} jobs")
 
     def tune(self,
              dataset: ModelingDataset,
@@ -129,7 +131,7 @@ class HyperparameterTuner:
 
         # Run optimization
         logger.info(f"Starting optimization: {n_trials} trials...")
-        study.optimize(objective, n_trials=n_trials, n_jobs=8, show_progress_bar=False)
+        study.optimize(objective, n_trials=n_trials, n_jobs=self.compute_config.optuna_n_jobs, show_progress_bar=True)
 
         optimization_time = time.time() - start_time
 
@@ -190,48 +192,35 @@ class HyperparameterTuner:
         return cv_splits
 
     def _get_search_space(self, trial: optuna.Trial, model_type: str) -> Dict[str, Any]:
-        """Define hyperparameter search space for different model types.
+        """Get hyperparameter search space from the model class.
+
+        This method delegates to the model class's get_search_space() method,
+        allowing each model to define its own search space.
 
         Args:
             trial: Optuna trial object
-            model_type: Type of model (e.g., 'xgboost_quantile', 'xgboost_standard')
+            model_type: Type of model (e.g., 'xgboost_quantile', 'lightning_standard')
 
         Returns:
             Dictionary of hyperparameters for the trial
+
+        Raises:
+            NotImplementedError: If the model class does not support hyperparameter tuning
         """
-        if model_type == "xgboost_quantile":
-            return {
-                'eta': trial.suggest_float('eta', 0.01, 0.3),
-                'max_depth': trial.suggest_int('max_depth', 3, 10),
-                'min_child_weight': trial.suggest_int('min_child_weight', 1, 30),
-                'subsample': trial.suggest_float('subsample', 0.6, 1.0),
-                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
-                'gamma': trial.suggest_float('gamma', 0.0, 5.0),
-                'reg_alpha': trial.suggest_float('reg_alpha', 0.0, 10.0),
-                'reg_lambda': trial.suggest_float('reg_lambda', 0.1, 10.0),
-                'n_estimators': trial.suggest_int('n_estimators', 50, 300),
-                'seed': self.random_state
-            }
+        try:
+            # Get model class from registry
+            model_class = model_registry.get_model_class(model_type)
 
-        elif model_type == "xgboost_standard":
-            return {
-                'eta': trial.suggest_float('eta', 0.01, 0.3),
-                'max_depth': trial.suggest_int('max_depth', 3, 10),
-                'min_child_weight': trial.suggest_int('min_child_weight', 1, 30),
-                'subsample': trial.suggest_float('subsample', 0.6, 1.0),
-                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
-                'gamma': trial.suggest_float('gamma', 0.0, 5.0),
-                'reg_alpha': trial.suggest_float('reg_alpha', 0.0, 10.0),
-                'reg_lambda': trial.suggest_float('reg_lambda', 0.1, 10.0),
-                'n_estimators': trial.suggest_int('n_estimators', 50, 300),
-                'seed': self.random_state
-            }
+            # Delegate to model class's search space method
+            params = model_class.get_search_space(trial, self.random_state)
 
-        else:
-            # Placeholder for other model types (Lightning, etc.)
+            return params
+
+        except NotImplementedError as e:
             raise NotImplementedError(
-                f"Search space not yet defined for model_type='{model_type}'. "
-                f"Currently supported: xgboost_quantile, xgboost_standard"
+                f"Model type '{model_type}' does not support hyperparameter tuning. "
+                f"Implement get_search_space() method in the model class to enable tuning. "
+                f"Original error: {str(e)}"
             )
 
     def _create_objective(self, X_train: np.ndarray, y_train: np.ndarray,
@@ -250,52 +239,66 @@ class HyperparameterTuner:
             Objective function for Optuna to minimize
         """
         def objective(trial):
-            # Get hyperparameters for this trial
-            params = self._get_search_space(trial, model_type)
+            try:
+                # Get hyperparameters for this trial
+                params = self._get_search_space(trial, model_type)
 
-            # Perform cross-validation
-            fold_scores = []
+                logger.info(f"Trial {trial.number} started with params: {params}")
 
-            for fold_idx, (train_idx, val_idx) in enumerate(cv_splits):
-                # Split data for this fold
-                X_fold_train = X_train[train_idx]
-                y_fold_train = y_train[train_idx]
-                X_fold_val = X_train[val_idx]
-                y_fold_val = y_train[val_idx]
+                # Perform cross-validation
+                fold_scores = []
 
-                # Get model class from registry
-                model_class = model_registry.get_model_class(model_type)
+                for fold_idx, (train_idx, val_idx) in enumerate(cv_splits):
+                    logger.info(f"Trial {trial.number}, Fold {fold_idx + 1}/{len(cv_splits)} started")
 
-                # Instantiate model with trial parameters
-                if model_registry.requires_quantile(model_type):
-                    if quantile_alpha is None:
-                        raise ValueError(
-                            f"quantile_alpha must be provided for model_type='{model_type}'"
-                        )
-                    model_instance = model_class(
-                        quantile_alphas=[quantile_alpha],
-                        **params
-                    )
-                else:
-                    model_instance = model_class(**params)
+                    try:
+                        # Split data for this fold
+                        X_fold_train = X_train[train_idx]
+                        y_fold_train = y_train[train_idx]
+                        X_fold_val = X_train[val_idx]
+                        y_fold_val = y_train[val_idx]
 
-                # Train model on fold
-                model_instance.train(X_fold_train, y_fold_train)
+                        # Get model class from registry
+                        model_class = model_registry.get_model_class(model_type)
 
-                # Predict on validation fold
-                y_pred = model_instance.predict(X_fold_val)
+                        # Instantiate model with trial parameters
+                        if model_registry.requires_quantile(model_type):
+                            if quantile_alpha is None:
+                                raise ValueError(
+                                    f"quantile_alpha must be provided for model_type='{model_type}'"
+                                )
+                            model_instance = model_class(
+                                quantile_alphas=[quantile_alpha],
+                                **params
+                            )
+                        else:
+                            model_instance = model_class(**params)
 
-                # Calculate loss
-                loss = self._calculate_loss(y_fold_val, y_pred, quantile_alpha)
-                fold_scores.append(loss)
+                        # Train model on fold
+                        model_instance.train(X_fold_train, y_fold_train, compute_config=self.compute_config)
 
-                logger.debug(f"Trial {trial.number}, Fold {fold_idx + 1}: loss={loss:.6f}")
+                        # Predict on validation fold
+                        y_pred = model_instance.predict(X_fold_val)
 
-            # Return mean validation loss across folds
-            mean_loss = np.mean(fold_scores)
-            logger.debug(f"Trial {trial.number}: mean_loss={mean_loss:.6f}")
+                        # Calculate loss
+                        loss = self._calculate_loss(y_fold_val, y_pred, quantile_alpha)
+                        fold_scores.append(loss)
 
-            return mean_loss
+                        logger.info(f"Trial {trial.number}, Fold {fold_idx + 1}: loss={loss:.6f}")
+
+                    except Exception as fold_error:
+                        logger.error(f"Trial {trial.number}, Fold {fold_idx + 1} failed: {str(fold_error)}")
+                        raise  # Re-raise to fail the trial
+
+                # Return mean validation loss across folds
+                mean_loss = np.mean(fold_scores)
+                logger.info(f"Trial {trial.number} completed: mean_loss={mean_loss:.6f}")
+
+                return mean_loss
+
+            except Exception as trial_error:
+                logger.error(f"Trial {trial.number} failed completely: {str(trial_error)}")
+                raise  # Re-raise to let Optuna handle the failed trial
 
         return objective
 
