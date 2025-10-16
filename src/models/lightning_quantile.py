@@ -76,14 +76,7 @@ class QuantileForecastingModel(L.LightningModule):
         loss = self.pinball_loss(y_hat, y)
         self.log('train_loss', loss)
         return loss
-    
-    def validation_step(self, batch, batch_idx):
-        x, y = batch
-        y_hat = self(x).squeeze()
-        loss = self.pinball_loss(y_hat, y)
-        self.log('val_loss', loss)
-        return loss
-    
+
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
 
