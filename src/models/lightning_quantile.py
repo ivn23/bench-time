@@ -118,21 +118,32 @@ class LightningQuantileModel(BaseModel):
                 - random_state: Random seed (default: 42)
         """
         super().__init__(**model_params)
+
+        # Validate quantile_alphas is provided
         if quantile_alphas is None:
-            quantile_alphas = [0.7]
-        
+            raise ValueError(
+                "quantile_alphas must be explicitly provided. "
+                "Pass a list with one quantile level, e.g., quantile_alphas=[0.7]"
+            )
+
         if not quantile_alphas or len(quantile_alphas) != 1:
-            raise ValueError("Lightning quantile model currently supports exactly one quantile level")
-        
-        self.quantile_alpha = quantile_alphas[0]  # Keep internal usage for now
+            raise ValueError(
+                f"Lightning quantile model currently supports exactly one quantile level. "
+                f"Got {len(quantile_alphas) if quantile_alphas else 0} values."
+            )
+
+        self.quantile_alpha = quantile_alphas[0]
+
+        # Validate quantile_alpha is in valid range
+        if not 0 < self.quantile_alpha < 1:
+            raise ValueError(
+                f"quantile_alpha must be between 0 and 1 (exclusive), got {self.quantile_alpha}"
+            )
+
         self.model_type = "lightning_quantile"
         self.lightning_model = None
         self.trainer = None
         self.input_size = None
-        
-        # Validate quantile_alpha
-        if not 0 < self.quantile_alpha < 1:
-            raise ValueError("quantile_alpha must be between 0 and 1")
         
         # Set random seeds for reproducibility
         if "random_state" in self.model_params:
