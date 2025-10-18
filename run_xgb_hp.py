@@ -24,7 +24,7 @@ if str(current_dir) not in sys.path:
     sys.path.insert(0, str(current_dir))
 
 from src import (
-    DataConfig, ModelingStrategy, ReleaseManager, BenchmarkPipeline
+    DataConfig, ComputeConfig, ModelingStrategy, ReleaseManager, BenchmarkPipeline
 )
 from datetime import date
 from lets_plot import *
@@ -65,6 +65,7 @@ hp_random = {
         "alpha": 1.0,
         "tree_method": "hist",
         "num_boost_round": 100,
+        'nthread': -1,
         "seed": 42
 }
 hp_100 = {'eta': 0.299573707733717,
@@ -75,7 +76,8 @@ hp_100 = {'eta': 0.299573707733717,
         'gamma': 1.0789384910762259,
         'reg_alpha': 9.755231227570237,
         'reg_lambda': 8.295423481524228, 
-        'n_estimators': 297}
+        'n_estimators': 297,
+        'nthread': -1,}
 
 hp_500 = {'eta': 0.2251586017238223,
         'max_depth': 10,
@@ -85,7 +87,8 @@ hp_500 = {'eta': 0.2251586017238223,
         'gamma': 0.6139963456942783,
         'reg_alpha': 6.768595449859619,
         'reg_lambda': 4.832153974114423,
-        'n_estimators': 293}
+        'n_estimators': 293,
+        'nthread': -1,}
 
 hp_1000 = {'eta': 0.2657057478526166, 
         'max_depth': 9,
@@ -95,13 +98,19 @@ hp_1000 = {'eta': 0.2657057478526166,
         'gamma': 1.064228070424531, 
         'reg_alpha': 0.16585154768227728,
         'reg_lambda': 0.17000025072317992,
-        'n_estimators': 297} 
+        'n_estimators': 297,
+        'nthread': -1} 
 
 
 hp_list = [hp_random,hp_100,hp_500,hp_1000]
 quantiles = [0.5, 0.7, 0.9, 0.95, 0.99]
 
-
+compute_config = ComputeConfig(
+    accelerator="cpu",          # macOS M4: Use CPU (MPS not stable for Lightning)
+    dataloader_workers=0,       # Main process only (safest on macOS)
+    optuna_n_jobs=1,           # Sequential trials (avoids segfaults)
+    torch_threads=1            # Single-threaded (prevents multiprocessing conflicts)
+)
 
 data_config = DataConfig(
     mapping_path = 'data/feature_mapping_train.pkl',
@@ -119,7 +128,7 @@ for i, hp in enumerate(hp_list, start=1):
     logger.info(f"EXPERIMENT {i}/{len(hp_list)}: Starting training with hyperparameters set {i}")
     logger.info("="*80)
 
-    pipeline = BenchmarkPipeline(data_config)
+    pipeline = BenchmarkPipeline(data_config,compute_config)
 
     results = pipeline.run_experiment(
         sku_tuples= sku_tuples_complete,
@@ -160,7 +169,7 @@ experiment_results = pl.concat(results_dfs, how="vertical")
 
 logger.info("="*80)
 logger.info("Saving results to myexp.csv")
-experiment_results.write_csv("xgb_quantile_hp_all", separator=",", include_header=True)
+experiment_results.write_csv("xgb_quantile_hp_all_2.csv", separator=",", include_header=True)
 logger.info(f"✓ Results saved: {len(experiment_results)} rows")
 logger.info("="*80)
 logger.info("ALL EXPERIMENTS COMPLETED SUCCESSFULLY")

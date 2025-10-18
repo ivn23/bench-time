@@ -41,18 +41,27 @@ class StatQuantModel(BaseModel):
             **model_params: Additional parameters for QuantReg
         """
         super().__init__(**model_params)
-        
+
+        # Validate quantile_alphas is provided
         if quantile_alphas is None:
-            quantile_alphas = [0.7]
-        
+            raise ValueError(
+                "quantile_alphas must be explicitly provided. "
+                "Pass a list with one quantile level, e.g., quantile_alphas=[0.7]"
+            )
+
         if not quantile_alphas or len(quantile_alphas) != 1:
-            raise ValueError("StatQuant model currently supports exactly one quantile level")
-        
-        # Validate quantile_alpha
-        if not (0 < quantile_alphas[0] < 1):
-            raise ValueError(f"quantile_alphas values must be between 0 and 1, got {quantile_alphas[0]}")
-        
-        self.quantile_alpha = quantile_alphas[0]  # Keep internal usage for now
+            raise ValueError(
+                f"StatQuant model currently supports exactly one quantile level. "
+                f"Got {len(quantile_alphas) if quantile_alphas else 0} values."
+            )
+
+        self.quantile_alpha = quantile_alphas[0]
+
+        # Validate quantile_alpha is in valid range
+        if not 0 < self.quantile_alpha < 1:
+            raise ValueError(
+                f"quantile_alpha must be between 0 and 1 (exclusive), got {self.quantile_alpha}"
+            )
         self.model_type = "statquant"
         self.fitted_model = None  # Store the fitted QuantReg results
         

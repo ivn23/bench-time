@@ -14,14 +14,14 @@ from .base import BaseModel, ModelPredictionError
 
 class XGBoostQuantileModel(BaseModel):
     """
-    Quantile XGBoost regression model using custom objective function.
-    
-    This implementation uses xgb.train() with a custom pinball loss objective
-    to perform quantile regression, following the approach from the notebook.
+    Quantile XGBoost regression model using native reg:quantileerror objective.
+
+    This implementation uses xgb.train() with XGBoost's native quantile regression
+    objective, which provides proper handling of gradient asymmetry and stability.
     """
     
     MODEL_TYPE = "xgboost_quantile"
-    DESCRIPTION = "Quantile XGBoost regression model with custom objective"
+    DESCRIPTION = "Quantile XGBoost regression model with native reg:quantileerror objective"
     REQUIRES_QUANTILE = True
     
     def __init__(self, quantile_alphas: List[float] = None, **model_params):
@@ -75,62 +75,38 @@ class XGBoostQuantileModel(BaseModel):
                 "Either 'n_estimators' or 'num_boost_round' must be provided in model parameters. "
                 "These specify the number of boosting rounds for training."
             )
-    
-    def _create_quantile_objective(self):
+
+    def train(self, X_train: np.ndarray, y_train: np.ndarray, **training_kwargs) -> None:
         """
-        Create quantile loss objective function for XGBoost.
-        
-        Returns:
-            Objective function compatible with XGBoost obj parameter
-        """
-        def objective(predt: np.ndarray, dtrain: xgb.DMatrix) -> Tuple[np.ndarray, np.ndarray]:
-            """
-            Quantile loss objective function (pinball loss).
-            
-            Returns gradient and hessian for XGBoost optimization.
-            """
-            y_true = dtrain.get_label()
-            residual = y_true - predt
-            
-            # Gradient of quantile loss (pinball loss derivative)
-            gradient = np.where(residual >= 0, -self.quantile_alpha, 1 - self.quantile_alpha)
-            
-            # Hessian approximation (constant for stability)
-            hessian = np.ones_like(gradient) * 1 
-            
-            return gradient, hessian
-        
-        return objective
-        
-    def train(self, X_train: np.ndarray, y_train: np.ndarray) -> None:
-        """
-        Train the quantile XGBoost model using custom objective.
-        
+        Train the quantile XGBoost model using native reg:quantileerror objective.
+
         Args:
             X_train: Training features
             y_train: Training targets
-            **training_kwargs: Additional training parameters
+            **training_kwargs: Additional training parameters (e.g., compute_config)
         """
 
         # Create DMatrix for training data
         dtrain = xgb.DMatrix(X_train, label=y_train)
-        
+
         # Use n_estimators stored during initialization as num_boost_round
         num_boost_round = self.n_estimators
-        
-        
-        # Create quantile objective function
-        quantile_objective = self._create_quantile_objective()
-        
-        # Train model with custom objective
+
+        # Configure parameters with native quantile objective
+        params = {
+            'objective': 'reg:quantileerror',
+            'quantile_alpha': self.quantile_alpha,
+            **self.model_params
+        }
+
+        # Train model with native quantile objective
         self.model = xgb.train(
-            params=self.model_params,
+            params=params,
             dtrain=dtrain,
             num_boost_round=num_boost_round,
-            obj=quantile_objective,
             verbose_eval=False
         )
-        
+
         self.is_trained = True
             
             
@@ -168,7 +144,7 @@ class XGBoostQuantileModel(BaseModel):
             "quantile_alpha": self.quantile_alpha,
             "is_trained": self.is_trained,
             "model_class": "XGBQuantileModel",
-            "training_method": "xgb_train_custom_objective"
+            "training_method": "xgb_train_native_objective"
         }
 
         return info
