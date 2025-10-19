@@ -16,7 +16,6 @@ from torch.utils.data import DataLoader, TensorDataset
 import lightning as L
 
 from .base import BaseModel, ModelPredictionError
-from ..structures import ComputeConfig
 
 logger = logging.getLogger(__name__)
 
@@ -191,26 +190,25 @@ class LightningQuantileModel(BaseModel):
             dataset,
             batch_size=batch_size,
             shuffle=shuffle,
-            num_workers=self.compute_config.dataloader_workers,
+            num_workers=0,  # Hardcoded default (main process only)
             persistent_workers=False  # Safer default
         )
         
-    def train(self, X_train: np.ndarray, y_train: np.ndarray, compute_config: ComputeConfig, **training_kwargs) -> None:
+    def train(self, X_train: np.ndarray, y_train: np.ndarray, **training_kwargs) -> None:
         """
         Train the Lightning quantile model using all provided training data.
 
         Args:
             X_train: Training features
             y_train: Training targets
-            compute_config: Compute resource configuration
             **training_kwargs: Additional training parameters
 
         Note:
             This method uses all provided training data for quantile regression training without internal splits.
             The framework handles proper train/test separation at a higher level.
+            Compute settings (accelerator, workers) are hardcoded to safe defaults (cpu, 0 workers).
+            Users can manually configure torch.set_num_threads() before calling if needed.
         """
-        # Store compute config
-        self.compute_config = compute_config
 
         # Store input size for model architecture
         self.input_size = X_train.shape[1]
@@ -237,7 +235,7 @@ class LightningQuantileModel(BaseModel):
             "enable_checkpointing": False,  # Disable checkpointing for simplicity
             "logger": False,  # Disable logging for cleaner output
             "enable_progress_bar": False,  # Disable progress bar for cleaner output
-            "accelerator": compute_config.accelerator,  # Use configured accelerator
+            "accelerator": "cpu",  # Hardcoded default
             "strategy": "auto",  # Single-process strategy
             "enable_model_summary": False  # Reduce output verbosity
         }

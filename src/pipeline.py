@@ -13,7 +13,7 @@ from datetime import datetime
 
 from .structures import (
     ModelConfig, TrainingResult, ExperimentResults, SplitInfo,
-    ModelingStrategy, SkuList, DataConfig, ComputeConfig, ModelingDataset,
+    ModelingStrategy, SkuList, DataConfig, ModelingDataset,
     create_config, validate_sku_tuples, validate_modeling_strategy
 )
 from .data_loading import DataLoader
@@ -31,18 +31,13 @@ logger = logging.getLogger(__name__)
 
 class BenchmarkPipeline:
 
-    def __init__(self, data_config: DataConfig, compute_config: ComputeConfig):
+    def __init__(self, data_config: DataConfig):
         """
         Args:
             data_config: Data paths and splitting configuration
-            compute_config: Compute resource configuration
         """
         self.data_config = data_config
-        self.compute_config = compute_config
         logger.info("BenchmarkPipeline initialized")
-        logger.info(f"Compute: {compute_config.accelerator}, "
-                   f"{compute_config.dataloader_workers} workers, "
-                   f"{compute_config.optuna_n_jobs} Optuna jobs")
 
     def run_experiment(self,
                       sku_tuples: SkuList,
@@ -163,7 +158,7 @@ class BenchmarkPipeline:
             model_type: Type of model to tune
             quantile_alphas: Quantile levels (tunes on first only)
             tune_on: Number of SKUs to sample
-            tuning_config: Tuning configuration (n_trials, n_folds)
+            tuning_config: Tuning configuration (n_trials, n_folds, n_jobs)
             random_state: Random seed
             
         Returns:
@@ -186,7 +181,8 @@ class BenchmarkPipeline:
         config = tuning_config or {}
         n_trials = config.get('n_trials', 50)
         n_folds = config.get('n_folds', 3)
-        logger.info(f"Tuning configuration: {n_trials} trials, {n_folds} CV folds")
+        n_jobs = config.get('n_jobs', 1)
+        logger.info(f"Tuning configuration: {n_trials} trials, {n_folds} CV folds, {n_jobs} parallel jobs")
         
         # Step 4: Handle quantile models (tune for first quantile only)
         quantile_alpha = quantile_alphas[0] if quantile_alphas else None
@@ -198,7 +194,7 @@ class BenchmarkPipeline:
             )
         
         # Step 5: Run hyperparameter optimization
-        tuner = HyperparameterTuner(random_state=random_state, compute_config=self.compute_config)
+        tuner = HyperparameterTuner(random_state=random_state, n_jobs=n_jobs)
         result = tuner.tune(
             dataset=tuning_dataset,
             model_type=model_type,
@@ -273,7 +269,7 @@ class BenchmarkPipeline:
         X_train, y_train = DataLoader.prepare_training_data(dataset, config.model_type)
 
         # Train the model
-        model_instance.train(X_train, y_train, compute_config=self.compute_config)
+        model_instance.train(X_train, y_train)
         
         # Get split info from dataset
         split_info = dataset.get_split_info()

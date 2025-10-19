@@ -131,7 +131,7 @@ for i, hp in enumerate(hp_list, start=1):
     pipeline = BenchmarkPipeline(data_config,compute_config)
 
     results = pipeline.run_experiment(
-        sku_tuples= sku_tuples_complete,
+        sku_tuples= sku_tuples_complete[0:1000],
         modeling_strategy=ModelingStrategy.INDIVIDUAL,
         model_type="xgboost_quantile",
         quantile_alphas=quantiles,
