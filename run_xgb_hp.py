@@ -24,7 +24,7 @@ if str(current_dir) not in sys.path:
     sys.path.insert(0, str(current_dir))
 
 from src import (
-    DataConfig, ComputeConfig, ModelingStrategy, ReleaseManager, BenchmarkPipeline
+    DataConfig, ModelingStrategy, ReleaseManager, BenchmarkPipeline
 )
 from datetime import date
 from lets_plot import *
@@ -105,13 +105,6 @@ hp_1000 = {'eta': 0.2657057478526166,
 hp_list = [hp_random,hp_100,hp_500,hp_1000]
 quantiles = [0.5, 0.7, 0.9, 0.95, 0.99]
 
-compute_config = ComputeConfig(
-    accelerator="cpu",          # macOS M4: Use CPU (MPS not stable for Lightning)
-    dataloader_workers=0,       # Main process only (safest on macOS)
-    optuna_n_jobs=1,           # Sequential trials (avoids segfaults)
-    torch_threads=1            # Single-threaded (prevents multiprocessing conflicts)
-)
-
 data_config = DataConfig(
     mapping_path = 'data/feature_mapping_train.pkl',
     features_path = "/Users/ivn/Documents/PhD/Transformer Research/Code/Benchmarking/data/db_snapshot_offsite/train_data/processed/train_data_features.feather",
@@ -128,7 +121,7 @@ for i, hp in enumerate(hp_list, start=1):
     logger.info(f"EXPERIMENT {i}/{len(hp_list)}: Starting training with hyperparameters set {i}")
     logger.info("="*80)
 
-    pipeline = BenchmarkPipeline(data_config,compute_config)
+    pipeline = BenchmarkPipeline(data_config)
 
     results = pipeline.run_experiment(
         sku_tuples= sku_tuples_complete[0:1000],
