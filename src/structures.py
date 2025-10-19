@@ -60,15 +60,6 @@ class DataConfig:
 
 
 @dataclass
-class ComputeConfig:
-    """Explicit compute resource configuration."""
-    accelerator: str              # "cpu", "gpu", "auto", or "mps"
-    dataloader_workers: int       # DataLoader num_workers (0 = main process)
-    optuna_n_jobs: int           # Optuna parallel trials (1 = sequential)
-    torch_threads: Optional[int] # torch.set_num_threads (None = no limit)
-
-
-@dataclass
 class ModelingDataset:
     """
     Dataset container for model training.

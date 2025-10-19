@@ -9,7 +9,7 @@ This version uses clean, focused data structures for streamlined functionality.
 
 # Data structures and core functionality
 from .structures import (
-    ModelingStrategy, SkuTuple, SkuList, DataConfig, ComputeConfig, ModelingDataset,
+    ModelingStrategy, SkuTuple, SkuList, DataConfig, ModelingDataset,
     ModelConfig, SplitInfo, TrainingResult, ExperimentResults,
     create_config, validate_sku_tuples, validate_modeling_strategy
 )
@@ -33,7 +33,6 @@ __all__ = [
 
     # Data structures
     "DataConfig",
-    "ComputeConfig",
     "ModelingDataset",
     "ModelConfig",
     "SplitInfo",

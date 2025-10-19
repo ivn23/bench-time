@@ -14,7 +14,7 @@ import optuna
 from sklearn.model_selection import KFold
 
 
-from .structures import ModelingDataset, ComputeConfig
+from .structures import ModelingDataset
 from .model_types import model_registry
 
 logger = logging.getLogger(__name__)
@@ -75,17 +75,17 @@ class HyperparameterTuner:
     ModelingDataset objects using only training data for CV-based optimization.
     """
 
-    def __init__(self, random_state: int, compute_config: ComputeConfig):
+    def __init__(self, random_state: int, n_jobs: int = 1):
         """Initialize the tuner.
 
         Args:
             random_state: Random seed for reproducibility
-            compute_config: Compute resource configuration
+            n_jobs: Number of parallel Optuna trials (1=sequential, >1=parallel, -1=all cores)
         """
         self.random_state = random_state
-        self.compute_config = compute_config
+        self.n_jobs = n_jobs
         logger.info(f"HyperparameterTuner initialized with random_state={random_state}")
-        logger.info(f"Optuna parallelism: {compute_config.optuna_n_jobs} jobs")
+        logger.info(f"Optuna parallelism: {self.n_jobs} jobs ({'sequential' if n_jobs == 1 else 'parallel'})")
 
     def tune(self,
              dataset: ModelingDataset,
@@ -131,7 +131,7 @@ class HyperparameterTuner:
 
         # Run optimization
         logger.info(f"Starting optimization: {n_trials} trials...")
-        study.optimize(objective, n_trials=n_trials, n_jobs=self.compute_config.optuna_n_jobs, show_progress_bar=True)
+        study.optimize(objective, n_trials=n_trials, n_jobs=self.n_jobs, show_progress_bar=True)
 
         optimization_time = time.time() - start_time
 
@@ -275,7 +275,7 @@ class HyperparameterTuner:
                             model_instance = model_class(**params)
 
                         # Train model on fold
-                        model_instance.train(X_fold_train, y_fold_train, compute_config=self.compute_config)
+                        model_instance.train(X_fold_train, y_fold_train)
 
                         # Predict on validation fold
                         y_pred = model_instance.predict(X_fold_val)
