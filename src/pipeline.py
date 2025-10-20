@@ -8,8 +8,11 @@ No overengineered abstractions, just the essential functionality.
 """
 
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Union
 from datetime import datetime
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import multiprocessing
+import random
 
 from .structures import (
     ModelConfig, TrainingResult, ExperimentResults, SplitInfo,
@@ -19,14 +22,72 @@ from .structures import (
 from .data_loading import DataLoader
 from .evaluation import ModelEvaluator
 from .model_types import model_registry
+from .hyperparameter_tuning import HyperparameterTuner, TuningResult
 from tqdm import tqdm
 
-from typing import Dict, List, Any, Optional, Union
-import random
-
-from .hyperparameter_tuning import HyperparameterTuner, TuningResult
-
 logger = logging.getLogger(__name__)
+
+
+def _train_model_worker(task: Dict[str, Any]) -> TrainingResult:
+    """
+    Module-level worker function for parallel model training.
+
+    This function trains a single model in a separate process. It's designed to be
+    pickleable for use with ProcessPoolExecutor.
+
+    Args:
+        task: Dictionary containing:
+            - dataset: ModelingDataset for training
+            - config: ModelConfig with hyperparameters
+            - quantile_alpha: Optional quantile level
+            - idx: Task index for ordering results
+
+    Returns:
+        TrainingResult object with trained model and metadata
+    """
+    dataset = task['dataset']
+    config = task['config']
+    quantile_alpha = task.get('quantile_alpha')
+
+    # Get model class
+    model_class = model_registry.get_model_class(config.model_type)
+
+    # Prepare hyperparameters
+    model_params = config.hyperparameters.copy()
+
+    # Force nthread=1 for XGBoost models in parallel mode
+    if 'xgboost' in config.model_type.lower():
+        model_params['nthread'] = 1
+
+    if quantile_alpha is not None:
+        model_params['quantile_alphas'] = [quantile_alpha]
+
+    # Create and train model
+    model_instance = model_class(**model_params)
+
+    # Use DataLoader for centralized data preparation
+    X_train, y_train = DataLoader.prepare_training_data(dataset, config.model_type)
+
+    # Train the model
+    model_instance.train(X_train, y_train)
+
+    # Get split info from dataset
+    split_info = dataset.get_split_info()
+
+    # Create and return TrainingResult
+    result = TrainingResult(
+        model=model_instance,
+        model_type=config.model_type,
+        modeling_strategy=dataset.modeling_strategy,
+        sku_tuples=dataset.sku_tuples,
+        hyperparameters=model_params,
+        feature_columns=dataset.feature_cols,
+        target_column=dataset.target_col,
+        split_info=split_info,
+        quantile_level=quantile_alpha
+    )
+
+    return result
 
 
 class BenchmarkPipeline:
@@ -39,6 +100,101 @@ class BenchmarkPipeline:
         self.data_config = data_config
         logger.info("BenchmarkPipeline initialized")
 
+    def _determine_num_workers(self, model_type: str, n_workers: Optional[int] = None) -> int:
+        """
+        Determine number of parallel workers based on model type.
+
+        Lightning models use GPU and must run sequentially (1 worker).
+        XGBoost and other CPU models can parallelize across all cores.
+
+        Args:
+            model_type: Type of model being trained
+            n_workers: Optional user override for number of workers
+
+        Returns:
+            Number of workers to use (1 for Lightning, N for others)
+        """
+        # User override takes precedence
+        if n_workers is not None:
+            return max(1, n_workers)
+
+        # Lightning models require sequential execution (GPU exclusivity)
+        if 'lightning' in model_type.lower():
+            logger.info(f"Lightning model detected: using sequential training (GPU mode)")
+            return 1
+
+        # XGBoost and other CPU models: use all available cores
+        cpu_count = multiprocessing.cpu_count()
+        num_workers = max(1, cpu_count - 1)  # Leave 1 core free
+        logger.info(f"CPU model detected: using {num_workers} parallel workers")
+        return num_workers
+
+    def _train_models_parallel(self, datasets: List[ModelingDataset], config: ModelConfig,
+                               num_workers: int) -> List[TrainingResult]:
+        """
+        Train models in parallel using ProcessPoolExecutor.
+
+        Creates training tasks for all models, submits them to a process pool,
+        and collects results with progress tracking.
+
+        Args:
+            datasets: List of ModelingDataset objects
+            config: ModelConfig with hyperparameters
+            num_workers: Number of parallel workers
+
+        Returns:
+            List of TrainingResult objects in original order
+        """
+        # Create list of training tasks
+        tasks = []
+        task_idx = 0
+
+        for dataset in datasets:
+            if config.is_quantile_model:
+                # Multiple quantile models per dataset
+                for quantile_alpha in config.quantile_alphas:
+                    task = {
+                        'dataset': dataset,
+                        'config': config,
+                        'quantile_alpha': quantile_alpha,
+                        'idx': task_idx
+                    }
+                    tasks.append(task)
+                    task_idx += 1
+            else:
+                # Single standard model per dataset
+                task = {
+                    'dataset': dataset,
+                    'config': config,
+                    'quantile_alpha': None,
+                    'idx': task_idx
+                }
+                tasks.append(task)
+                task_idx += 1
+
+        logger.info(f"Training {len(tasks)} models in parallel using {num_workers} workers")
+
+        # Train models in parallel with progress tracking
+        results = [None] * len(tasks)
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            # Submit all tasks
+            future_to_idx = {executor.submit(_train_model_worker, task): task['idx']
+                            for task in tasks}
+
+            # Collect results as they complete with progress bar
+            with tqdm(total=len(tasks), desc="Training models") as pbar:
+                for future in as_completed(future_to_idx):
+                    idx = future_to_idx[future]
+                    try:
+                        result = future.result()
+                        results[idx] = result
+                        pbar.update(1)
+                    except Exception as exc:
+                        logger.error(f"Task {idx} generated an exception: {exc}")
+                        raise
+
+        return results
+
     def run_experiment(self,
                       sku_tuples: SkuList,
                       modeling_strategy: ModelingStrategy,
@@ -50,10 +206,11 @@ class BenchmarkPipeline:
                       mode: str = "train",
                       tune_on: Optional[int] = None,
                       tuning_config: Optional[Dict[str, Any]] = None,
+                      n_workers: Optional[int] = None,
                       random_state: int = 42) -> Union[ExperimentResults, TuningResult]:
         """
         Run benchmark experiment with mode-based execution.
-        
+
         Args:
             sku_tuples: List of (product_id, store_id) tuples
             modeling_strategy: COMBINED or INDIVIDUAL strategy
@@ -69,8 +226,12 @@ class BenchmarkPipeline:
             tuning_config: Tuning configuration dict with keys:
                 - 'n_trials': Number of Optuna trials (default: 50)
                 - 'n_folds': Number of CV folds (default: 3)
+            n_workers: Number of parallel workers for training (default: auto-detect based on model type)
+                - Lightning models: forced to 1 (GPU exclusivity)
+                - XGBoost/other: cpu_count - 1 (parallel training)
+                - Can be overridden by user for debugging or resource control
             random_state: Random seed for reproducibility
-            
+
         Returns:
             ExperimentResults: If mode="train"
             TuningResult: If mode="hp_tune"
@@ -117,10 +278,10 @@ class BenchmarkPipeline:
             # Step 1: Prepare data
             logger.info("Preparing data...")
             datasets = self._prepare_datasets(sku_tuples, modeling_strategy)
-            
+
             # Step 2: Train models
             logger.info(f"Training {len(datasets)} model(s)...")
-            training_results = self._train_models(datasets, config)
+            training_results = self._train_models(datasets, config, model_type, n_workers)
             
             # Step 3: Optionally evaluate on test data
             if evaluate_on_test:
@@ -230,14 +391,39 @@ class BenchmarkPipeline:
         else:
             raise ValueError(f"Unknown modeling strategy: {modeling_strategy}")
 
-    def _train_models(self, datasets: List[ModelingDataset], config: ModelConfig) -> List[TrainingResult]:
-        """Train models and return TrainingResult objects""" 
+    def _train_models(self, datasets: List[ModelingDataset], config: ModelConfig,
+                     model_type: str, n_workers: Optional[int] = None) -> List[TrainingResult]:
+        """
+        Train models and return TrainingResult objects.
 
+        Automatically detects model type and uses parallel or sequential training:
+        - Lightning models: sequential (GPU exclusivity)
+        - XGBoost/other: parallel across all CPUs
+
+        Args:
+            datasets: List of ModelingDataset objects
+            config: ModelConfig with hyperparameters
+            model_type: Type of model being trained
+            n_workers: Optional override for number of workers
+
+        Returns:
+            List of TrainingResult objects
+        """
+        # Determine number of workers
+        num_workers = self._determine_num_workers(model_type, n_workers)
+
+        # Use parallel training if more than 1 worker
+        if num_workers > 1:
+            logger.info(f"Using parallel training with {num_workers} workers")
+            return self._train_models_parallel(datasets, config, num_workers)
+
+        # Sequential training (original implementation)
+        logger.info("Using sequential training")
         all_results = []
-        
+
         for i, dataset in enumerate(tqdm(datasets, desc="Training models")):
             logger.info(f"Training model {i+1}/{len(datasets)} for {len(dataset.sku_tuples)} SKU(s)")
-            
+
             if config.is_quantile_model:
                 # Train multiple quantile models
                 for quantile_alpha in config.quantile_alphas:
@@ -247,7 +433,7 @@ class BenchmarkPipeline:
                 # Train single standard model
                 result = self._train_single_model(dataset, config)
                 all_results.append(result)
-        
+
         return all_results
 
     def _train_single_model(self, dataset: ModelingDataset, config: ModelConfig, 
