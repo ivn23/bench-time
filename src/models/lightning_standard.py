@@ -58,14 +58,17 @@ class ForecastingModel(L.LightningModule):
 
 class LightningStandardModel(BaseModel):
     """
-    Standard PyTorch Lightning neural network model for time series forecasting.
-    
+    Standard PyTorch Lightning neural network model for time series forecasting (CPU-only).
+
     This implementation integrates the Lightning prototype neural network
     into the M5 benchmarking framework following BaseModel interface patterns.
+
+    CPU-only operation is enforced for parallel training compatibility, allowing
+    multiple models to train simultaneously across process workers.
     """
     
     MODEL_TYPE = "lightning_standard"
-    DESCRIPTION = "PyTorch Lightning neural network for time series forecasting"
+    DESCRIPTION = "PyTorch Lightning neural network for time series forecasting (CPU-only)"
     DEFAULT_HYPERPARAMETERS = {
         "hidden_size": 128,
         "lr": 1e-3,
@@ -74,6 +77,7 @@ class LightningStandardModel(BaseModel):
         "batch_size": 64,
         "num_workers": 0,  # Conservative default for compatibility
         "random_state": 42
+        # Note: accelerator is hardcoded to 'cpu' for parallel training compatibility
     }
     
     def __init__(self, **model_params):
@@ -142,7 +146,7 @@ class LightningStandardModel(BaseModel):
             dataset,
             batch_size=batch_size,
             shuffle=shuffle,
-            num_workers=0,  # Hardcoded default (main process only)
+            num_workers=self.model_params.get('num_workers', 0),  # Configurable via model_params
             persistent_workers=False  # Safer default
         )
         
@@ -158,8 +162,8 @@ class LightningStandardModel(BaseModel):
         Note:
             This method uses all provided training data for training without internal splits.
             The framework handles proper train/test separation at a higher level.
-            Compute settings (accelerator, workers) are hardcoded to safe defaults (cpu, 0 workers).
-            Users can manually configure torch.set_num_threads() before calling if needed.
+            CPU-only training is enforced for parallel training compatibility.
+            In parallel mode, torch.set_num_threads(1) is automatically configured per worker.
         """
 
         # Store input size for model architecture
@@ -186,7 +190,7 @@ class LightningStandardModel(BaseModel):
             "enable_checkpointing": False,  # Disable checkpointing for simplicity
             "logger": False,  # Disable logging for cleaner output
             "enable_progress_bar": False,  # Disable progress bar for cleaner output
-            "accelerator": "cpu",  # Hardcoded default
+            "accelerator": "cpu",  # CPU-only for parallel training compatibility
             "strategy": "auto",  # Single-process strategy
             "enable_model_summary": False  # Reduce output verbosity
         }
@@ -371,6 +375,8 @@ class LightningStandardModel(BaseModel):
             'dropout': trial.suggest_float('dropout', 0.0, 0.5),
             'max_epochs': trial.suggest_int('max_epochs', 10, 30),
             'batch_size': trial.suggest_categorical('batch_size', [32, 64, 128, 256]),
-            'random_state': random_state
+            'random_state': random_state,
+            'accelerator': 'cpu',  # CPU-only for parallel training compatibility
+            'num_workers': 4  # Parallel data loading with 4 workers
         }
                 
