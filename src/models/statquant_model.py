@@ -6,19 +6,14 @@ following the framework's BaseModel interface.
 """
 
 import numpy as np
-from typing import Dict, Any, List, Optional, Tuple
-import warnings
+from typing import Dict, Any, List
 import logging
-from ..models.base import BaseModel, ModelTrainingError, ModelPredictionError
+from ..models.base import BaseModel, ModelPredictionError
+import statsmodels.api as sm
 
 logger = logging.getLogger(__name__)
 
-try:
-    import statsmodels.api as sm
-    from statsmodels.regression.quantile_regression import QuantReg
-except ImportError:
-    raise ImportError("statsmodels is required for StatQuantModel. Install with: pip install statsmodels")
-
+from statsmodels.regression.quantile_regression import QuantReg
 
 class StatQuantModel(BaseModel):
     """
@@ -67,8 +62,8 @@ class StatQuantModel(BaseModel):
         
         # Set default parameters if not provided
         default_params = {
-            'method': 'interior-point',
-            'max_iter': 1000,
+            'method': 'simplex',
+            'max_iter': 5000,
             'p_tol': 1e-6
         }
         
@@ -96,23 +91,8 @@ class StatQuantModel(BaseModel):
         X_clean = X_train.copy()
         y_clean = y_train.copy()
         
-        # Replace inf values with finite values
-        X_clean = np.where(np.isinf(X_clean), np.nan, X_clean)
-        
-        # Handle NaN/Inf values by removing rows with any missing data
-        # This is necessary because statsmodels QuantReg is strict about data quality
-        if np.isnan(X_clean).any() or np.isnan(y_clean).any():
-            # Find rows with any NaN values
-            valid_mask = ~(np.isnan(X_clean).any(axis=1) | np.isnan(y_clean))
-            X_clean = X_clean[valid_mask]
-            y_clean = y_clean[valid_mask]
-            
-            logger.info(f"Removed {np.sum(~valid_mask)} rows with missing values for StatQuant training")
-        
-        # Ensure we still have enough data after cleaning
-        if len(X_clean) < 10:  # Minimum sample size check
-            raise ValueError("Insufficient clean data for StatQuant training (< 10 samples after cleaning)")
-        
+        X_clean = sm.add_constant(X_clean, has_constant='add')
+
         # Create QuantReg model - note that QuantReg expects (endog, exog)
         self.model = QuantReg(endog=y_clean, exog=X_clean)
         
@@ -145,7 +125,9 @@ class StatQuantModel(BaseModel):
         if not self.is_trained or self.fitted_model is None:
             raise ModelPredictionError("Model must be trained before making predictions")
         
-        return self.fitted_model.predict(X)
+        X_with_const = sm.add_constant(X, has_constant='add')
+        
+        return self.fitted_model.predict(X_with_const)
     
     def get_model_info(self) -> Dict[str, Any]:
         """

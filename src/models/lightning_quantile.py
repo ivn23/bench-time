@@ -38,7 +38,6 @@ class QuantileForecastingModel(L.LightningModule):
         if not 0 < quantile_alpha < 1:
             raise ValueError("quantile_alpha must be between 0 and 1")
         
-        # layer so basteln, dass ich ddie size als HP machen kann
         self.model = nn.Sequential(
             nn.Linear(input_size, hidden_size),
             nn.ReLU(),
@@ -77,19 +76,22 @@ class QuantileForecastingModel(L.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
+        return torch.optim.AdamW(self.parameters(), lr=self.hparams.lr)
 
 
 class LightningQuantileModel(BaseModel):
     """
-    PyTorch Lightning quantile regression model for time series forecasting.
-    
+    PyTorch Lightning quantile regression model for time series forecasting (CPU-only).
+
     This implementation integrates quantile regression using pinball loss
     into the M5 benchmarking framework following BaseModel interface patterns.
+
+    CPU-only operation is enforced for parallel training compatibility, allowing
+    multiple models to train simultaneously across process workers.
     """
     
     MODEL_TYPE = "lightning_quantile"
-    DESCRIPTION = "PyTorch Lightning neural network with quantile regression"
+    DESCRIPTION = "PyTorch Lightning neural network with quantile regression (CPU-only)"
     DEFAULT_HYPERPARAMETERS = {
         "hidden_size": 128,
         "lr": 1e-3,
@@ -98,6 +100,7 @@ class LightningQuantileModel(BaseModel):
         "batch_size": 64,
         "num_workers": 0,  # Conservative default for compatibility
         "random_state": 42
+        # Note: accelerator is hardcoded to 'cpu' for parallel training compatibility
     }
     REQUIRES_QUANTILE = True
     
@@ -190,7 +193,7 @@ class LightningQuantileModel(BaseModel):
             dataset,
             batch_size=batch_size,
             shuffle=shuffle,
-            num_workers=0,  # Hardcoded default (main process only)
+            num_workers=self.model_params.get('num_workers', 0),  # Configurable via model_params
             persistent_workers=False  # Safer default
         )
         
@@ -206,8 +209,8 @@ class LightningQuantileModel(BaseModel):
         Note:
             This method uses all provided training data for quantile regression training without internal splits.
             The framework handles proper train/test separation at a higher level.
-            Compute settings (accelerator, workers) are hardcoded to safe defaults (cpu, 0 workers).
-            Users can manually configure torch.set_num_threads() before calling if needed.
+            CPU-only training is enforced for parallel training compatibility.
+            In parallel mode, torch.set_num_threads(1) is automatically configured per worker.
         """
 
         # Store input size for model architecture
@@ -235,7 +238,7 @@ class LightningQuantileModel(BaseModel):
             "enable_checkpointing": False,  # Disable checkpointing for simplicity
             "logger": False,  # Disable logging for cleaner output
             "enable_progress_bar": False,  # Disable progress bar for cleaner output
-            "accelerator": "cpu",  # Hardcoded default
+            "accelerator": "cpu",  # CPU-only for parallel training compatibility
             "strategy": "auto",  # Single-process strategy
             "enable_model_summary": False  # Reduce output verbosity
         }
@@ -417,11 +420,13 @@ class LightningQuantileModel(BaseModel):
             Dictionary of hyperparameters sampled from the search space
         """
         return {
-            'hidden_size': trial.suggest_int('hidden_size', 32, 512, step=32),
+            'hidden_size': trial.suggest_int('hidden_size', 32, 128, step=32),
             'lr': trial.suggest_float('lr', 1e-5, 1e-2, log=True),
             'dropout': trial.suggest_float('dropout', 0.0, 0.5),
             'max_epochs': trial.suggest_int('max_epochs', 10, 30),
             'batch_size': trial.suggest_categorical('batch_size', [32, 64, 128, 256]),
-            'random_state': random_state
+            'random_state': random_state,
+            'accelerator': 'cpu',  # CPU-only for parallel training compatibility
+            'num_workers': 4  # Parallel data loading with 4 workers
         }
                 

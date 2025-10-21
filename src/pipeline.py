@@ -59,6 +59,11 @@ def _train_model_worker(task: Dict[str, Any]) -> TrainingResult:
     if 'xgboost' in config.model_type.lower():
         model_params['nthread'] = 1
 
+    # Force single-threaded PyTorch for Lightning models in parallel mode
+    if 'lightning' in config.model_type.lower():
+        import torch
+        torch.set_num_threads(1)
+
     if quantile_alpha is not None:
         model_params['quantile_alphas'] = [quantile_alpha]
 
@@ -104,29 +109,24 @@ class BenchmarkPipeline:
         """
         Determine number of parallel workers based on model type.
 
-        Lightning models use GPU and must run sequentially (1 worker).
-        XGBoost and other CPU models can parallelize across all cores.
+        Both XGBoost and Lightning models run in parallel on CPU with single-threaded
+        execution per worker to prevent thread contention.
 
         Args:
             model_type: Type of model being trained
             n_workers: Optional user override for number of workers
 
         Returns:
-            Number of workers to use (1 for Lightning, N for others)
+            Number of workers to use (default: cpu_count - 1)
         """
         # User override takes precedence
         if n_workers is not None:
             return max(1, n_workers)
 
-        # Lightning models require sequential execution (GPU exclusivity)
-        if 'lightning' in model_type.lower():
-            logger.info(f"Lightning model detected: using sequential training (GPU mode)")
-            return 1
-
-        # XGBoost and other CPU models: use all available cores
+        # All CPU models: use all available cores (leave 1 free)
         cpu_count = multiprocessing.cpu_count()
-        num_workers = max(1, cpu_count - 1)  # Leave 1 core free
-        logger.info(f"CPU model detected: using {num_workers} parallel workers")
+        num_workers = max(1, cpu_count - 1)
+        logger.info(f"Using {num_workers} parallel workers for {model_type}")
         return num_workers
 
     def _train_models_parallel(self, datasets: List[ModelingDataset], config: ModelConfig,
@@ -226,9 +226,9 @@ class BenchmarkPipeline:
             tuning_config: Tuning configuration dict with keys:
                 - 'n_trials': Number of Optuna trials (default: 50)
                 - 'n_folds': Number of CV folds (default: 3)
-            n_workers: Number of parallel workers for training (default: auto-detect based on model type)
-                - Lightning models: forced to 1 (GPU exclusivity)
-                - XGBoost/other: cpu_count - 1 (parallel training)
+            n_workers: Number of parallel workers for training (default: auto-detect)
+                - Default: cpu_count - 1 (parallel training for all model types)
+                - Both Lightning and XGBoost use CPU-only with single-threaded execution per worker
                 - Can be overridden by user for debugging or resource control
             random_state: Random seed for reproducibility
 
@@ -396,9 +396,9 @@ class BenchmarkPipeline:
         """
         Train models and return TrainingResult objects.
 
-        Automatically detects model type and uses parallel or sequential training:
-        - Lightning models: sequential (GPU exclusivity)
-        - XGBoost/other: parallel across all CPUs
+        Uses parallel training across all CPU cores for all model types:
+        - Lightning models: CPU-only with torch.set_num_threads(1) per worker
+        - XGBoost models: CPU-only with nthread=1 per worker
 
         Args:
             datasets: List of ModelingDataset objects

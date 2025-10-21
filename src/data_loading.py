@@ -7,10 +7,9 @@ Centralized data preparation for all model training and evaluation needs.
 import polars as pl
 import numpy as np
 import pickle
-from typing import Dict, List, Optional, Tuple, Any, Union
-from pathlib import Path
+from typing import Dict, List, Tuple, Any
 import logging
-import os
+from sklearn.preprocessing import StandardScaler
 
 from .structures import DataConfig, ModelingStrategy, ModelingDataset, SkuList, TrainingResult
 
@@ -173,7 +172,14 @@ class DataLoader:
         X, y, feature_cols = self._prepare_features(features_df, target_df)
         # Apply temporal splitting with configuration
         X_train, y_train, X_test, y_test, split_info = self._apply_temporal_split(X, y)
-        
+
+        # Fit StandardScaler on training data for feature normalization
+        # Scaler is fitted on training data only to prevent data leakage
+        scaler = StandardScaler()
+        X_train_values = X_train.select(feature_cols).to_numpy()
+        scaler.fit(X_train_values)
+        logger.debug(f"Fitted StandardScaler on {X_train_values.shape[0]} training samples with {len(feature_cols)} features")
+
         # Calculate dataset statistics
         dataset_stats = {
             "n_samples_total": len(X),
@@ -182,7 +188,7 @@ class DataLoader:
             "n_features": len(feature_cols),
             "n_skus": len(sku_tuples)
         }
-        
+
         logger.info(f"Dataset prepared: {dataset_stats['n_samples_train']} train, {dataset_stats['n_samples_test']} test samples")
         
         return ModelingDataset(
@@ -196,7 +202,8 @@ class DataLoader:
             modeling_strategy=modeling_strategy,
             train_bdids=split_info.get('train_bdids', np.array([])),
             test_bdids=split_info.get('test_bdids', np.array([])),
-            split_date=split_info.get('split_date')
+            split_date=split_info.get('split_date'),
+            scaler=scaler
         )
     
     def _filter_sku_data(self, sku_tuples: SkuList, strategy: ModelingStrategy) -> Tuple[pl.DataFrame, pl.DataFrame]:
@@ -310,7 +317,18 @@ class DataLoader:
             # All other models use numpy arrays
             X_train = dataset.X_train.select(dataset.feature_cols).to_numpy()
             y_train = dataset.y_train.select(dataset.target_col).to_numpy().flatten()
-        
+
+        # Apply normalization for models that need it (StatQuant, Lightning)
+        # XGBoost does NOT need normalization (tree-based, scale-invariant)
+        needs_normalization = (
+            "statquant" in model_type.lower() or
+            "lightning" in model_type.lower()
+        )
+
+        if needs_normalization and dataset.scaler is not None:
+            X_train = dataset.scaler.transform(X_train)
+            logger.debug(f"Applied feature normalization to training data for {model_type}")
+
         logger.debug(f"Prepared training data for {model_type}: X shape {X_train.shape}, y shape {y_train.shape}")
         return X_train, y_train
     
@@ -334,7 +352,17 @@ class DataLoader:
             # All other models use numpy arrays
             X_test = dataset.X_test.select(dataset.feature_cols).to_numpy()
             y_test = dataset.y_test.select(dataset.target_col).to_numpy().flatten()
-        
+
+        # Apply normalization for models that need it
+        needs_normalization = (
+            "statquant" in model_type.lower() or
+            "lightning" in model_type.lower()
+        )
+
+        if needs_normalization and dataset.scaler is not None:
+            X_test = dataset.scaler.transform(X_test)
+            logger.debug(f"Applied feature normalization to test data for {model_type}")
+
         logger.debug(f"Prepared test data for {model_type}: X shape {X_test.shape}, y shape {y_test.shape}")
         return X_test, y_test
     

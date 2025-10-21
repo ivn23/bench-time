@@ -75,7 +75,10 @@ class ModelingDataset:
     target_col: str
     sku_tuples: SkuList
     modeling_strategy: ModelingStrategy
-    
+
+    # Feature normalization scaler (fitted on training data)
+    scaler: Optional[Any] = None
+
     # Split information embedded directly (replaces separate DataSplit)
     train_bdids: np.ndarray = field(default_factory=lambda: np.array([]))
     test_bdids: np.ndarray = field(default_factory=lambda: np.array([]))
