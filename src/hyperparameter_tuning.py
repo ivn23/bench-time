@@ -251,10 +251,12 @@ class HyperparameterTuner:
                 # Get hyperparameters for this trial
                 params = self._get_search_space(trial, model_type)
 
-                # Add resource configuration parameters (not tuned, fixed for all trials)
-                params['num_workers'] = self.dataloader_workers
-                params['accelerator'] = self.accelerator
-                params['devices'] = self.devices
+                # Add resource configuration parameters only for Lightning models
+                # (XGBoost and other models don't use these PyTorch-specific parameters)
+                if 'lightning' in model_type.lower():
+                    params['num_workers'] = self.dataloader_workers
+                    params['accelerator'] = self.accelerator
+                    params['devices'] = self.devices
 
                 logger.info(f"Trial {trial.number} started with params: {params}")
 
