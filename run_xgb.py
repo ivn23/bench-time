@@ -126,6 +126,7 @@ def main():
             quantile_alphas=quantiles,
             hyperparameters = hp,
             experiment_name=f"xgb_quantile_{i}",
+            data_workers=8,
             evaluate_on_test=True
         )
 

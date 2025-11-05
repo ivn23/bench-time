@@ -10,7 +10,7 @@ No overengineered abstractions, just the essential functionality.
 import logging
 from typing import Dict, List, Any, Optional, Union
 from datetime import datetime
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 import multiprocessing
 import random
 
@@ -129,6 +129,40 @@ class BenchmarkPipeline:
         logger.info(f"Using {num_workers} parallel workers for {model_type}")
         return num_workers
 
+    def _determine_data_workers(self, data_workers: Optional[int] = None) -> int:
+        """
+        Determine number of parallel workers for dataset creation.
+
+        I/O-bound operations benefit from oversubscription (more threads than CPUs).
+        For network storage, use fewer workers to avoid I/O contention.
+
+        Args:
+            data_workers: Optional user override for number of workers
+
+        Returns:
+            Number of workers to use for parallel dataset creation
+        """
+        # User override takes precedence
+        if data_workers is not None:
+            return max(1, data_workers)
+
+        # Check if data is on network storage (conservative worker count)
+        features_path_str = str(self.data_config.features_path)
+        is_network_storage = any(indicator in features_path_str.lower()
+                                for indicator in ['db_snapshot_offsite', 'nfs', 'network', 'remote'])
+
+        if is_network_storage:
+            # Conservative for network storage to avoid I/O contention
+            num_workers = 8
+            logger.info(f"Detected network storage - using {num_workers} data loading workers")
+        else:
+            # Local storage: I/O-bound tasks benefit from oversubscription
+            cpu_count = multiprocessing.cpu_count()
+            num_workers = cpu_count * 2  # 2x oversubscription for I/O
+            logger.info(f"Detected local storage - using {num_workers} data loading workers (2x CPU count)")
+
+        return num_workers
+
     def _train_models_parallel(self, datasets: List[ModelingDataset], config: ModelConfig,
                                num_workers: int) -> List[TrainingResult]:
         """
@@ -207,6 +241,7 @@ class BenchmarkPipeline:
                       tune_on: Optional[int] = None,
                       tuning_config: Optional[Dict[str, Any]] = None,
                       n_workers: Optional[int] = None,
+                      data_workers: Optional[int] = None,
                       random_state: int = 42) -> Union[ExperimentResults, TuningResult]:
         """
         Run benchmark experiment with mode-based execution.
@@ -230,6 +265,11 @@ class BenchmarkPipeline:
                 - Default: cpu_count - 1 (parallel training for all model types)
                 - Both Lightning and XGBoost use CPU-only with single-threaded execution per worker
                 - Can be overridden by user for debugging or resource control
+            data_workers: Number of parallel workers for dataset loading (INDIVIDUAL strategy only)
+                - Default: Auto-detect based on storage type
+                - Network storage: 8 workers (conservative to avoid I/O contention)
+                - Local storage: cpu_count * 2 (I/O-bound tasks benefit from oversubscription)
+                - COMBINED strategy: Not used (single dataset)
             random_state: Random seed for reproducibility
 
         Returns:
@@ -277,7 +317,7 @@ class BenchmarkPipeline:
             
             # Step 1: Prepare data
             logger.info("Preparing data...")
-            datasets = self._prepare_datasets(sku_tuples, modeling_strategy)
+            datasets = self._prepare_datasets(sku_tuples, modeling_strategy, data_workers)
 
             # Step 2: Train models
             logger.info(f"Training {len(datasets)} model(s)...")
@@ -384,25 +424,85 @@ class BenchmarkPipeline:
         
         return result
             
-    def _prepare_datasets(self, sku_tuples: SkuList, modeling_strategy: ModelingStrategy) -> List[ModelingDataset]:
-        
+    def _prepare_datasets(self, sku_tuples: SkuList, modeling_strategy: ModelingStrategy,
+                         data_workers: Optional[int] = None) -> List[ModelingDataset]:
+        """
+        Prepare datasets for modeling based on strategy.
+
+        Args:
+            sku_tuples: List of (product_id, store_id) tuples
+            modeling_strategy: COMBINED or INDIVIDUAL strategy
+            data_workers: Optional override for number of parallel workers (INDIVIDUAL only)
+
+        Returns:
+            List of ModelingDataset objects
+        """
         data_loader = DataLoader(self.data_config)
-        
+
         if modeling_strategy == ModelingStrategy.COMBINED:
             # Single dataset for all SKUs
             dataset = data_loader.prepare_modeling_dataset(sku_tuples, modeling_strategy)
             return [dataset]
-            
+
         elif modeling_strategy == ModelingStrategy.INDIVIDUAL:
-            # Separate dataset for each SKU
+            # Determine number of workers for parallel loading
+            num_workers = self._determine_data_workers(data_workers)
+
+            # Use parallel loading if more than 1 worker
+            if num_workers > 1:
+                logger.info(f"Loading {len(sku_tuples)} datasets in parallel with {num_workers} workers")
+                return self._prepare_datasets_parallel(sku_tuples, data_loader, num_workers)
+
+            # Sequential loading (fallback)
+            logger.info(f"Loading {len(sku_tuples)} datasets sequentially")
             datasets = []
-            for sku_tuple in tqdm(sku_tuples):
+            for sku_tuple in tqdm(sku_tuples, desc="Loading datasets"):
                 dataset = data_loader.prepare_modeling_dataset([sku_tuple], modeling_strategy)
                 datasets.append(dataset)
             return datasets
-            
+
         else:
             raise ValueError(f"Unknown modeling strategy: {modeling_strategy}")
+
+    def _prepare_datasets_parallel(self, sku_tuples: SkuList, data_loader: 'DataLoader',
+                                   num_workers: int) -> List[ModelingDataset]:
+        """
+        Load datasets in parallel using ThreadPoolExecutor.
+
+        Args:
+            sku_tuples: List of (product_id, store_id) tuples
+            data_loader: DataLoader instance
+            num_workers: Number of parallel threads
+
+        Returns:
+            List of ModelingDataset objects
+        """
+        datasets = []
+
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            # Submit all dataset creation tasks
+            future_to_sku = {
+                executor.submit(
+                    data_loader.prepare_modeling_dataset,
+                    [sku_tuple],
+                    ModelingStrategy.INDIVIDUAL
+                ): sku_tuple
+                for sku_tuple in sku_tuples
+            }
+
+            # Collect results with progress bar
+            for future in tqdm(as_completed(future_to_sku), total=len(sku_tuples),
+                             desc="Loading datasets", unit="SKU"):
+                sku_tuple = future_to_sku[future]
+                try:
+                    dataset = future.result()
+                    datasets.append(dataset)
+                except Exception as e:
+                    logger.error(f"Failed to create dataset for SKU {sku_tuple}: {e}")
+                    raise RuntimeError(f"Dataset creation failed for SKU {sku_tuple}") from e
+
+        logger.info(f"Successfully loaded {len(datasets)} datasets")
+        return datasets
 
     def _train_models(self, datasets: List[ModelingDataset], config: ModelConfig,
                      model_type: str, n_workers: Optional[int] = None) -> List[TrainingResult]:
