@@ -162,14 +162,36 @@ class XGBoostQuantileModel(BaseModel):
             Dictionary of hyperparameters sampled from the search space
         """
         return {
-            'eta': trial.suggest_float('eta', 0.01, 0.3),
-            'max_depth': trial.suggest_int('max_depth', 3, 10),
-            'min_child_weight': trial.suggest_int('min_child_weight', 1, 30),
+            # Learning rate: log scale, smaller is safer for stability on small data
+            'eta': trial.suggest_float('eta', 0.01, 0.2, log=True),
+
+            # Tree complexity: small range, shallow trees for few samples
+            'max_depth': trial.suggest_int('max_depth', 2, 6),
+
+            # Regularization on minimum child weight: controls overfitting on tiny leaves
+            'min_child_weight': trial.suggest_float('min_child_weight', 0.1, 10.0, log=True),
+
+            # Sampling parameters: prevent overfitting, stable ranges
             'subsample': trial.suggest_float('subsample', 0.6, 1.0),
-            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 1.0),
+
+            # Split regularization: discourages small gain splits
             'gamma': trial.suggest_float('gamma', 0.0, 5.0),
-            'reg_alpha': trial.suggest_float('reg_alpha', 0.0, 10.0),
-            'reg_lambda': trial.suggest_float('reg_lambda', 0.1, 10.0),
-            'n_estimators': trial.suggest_int('n_estimators', 50, 300),
+
+            # L1 / L2 regularization: log scale, large variation allowed
+            'reg_alpha': trial.suggest_float('reg_alpha', 1e-3, 10.0, log=True),
+            'reg_lambda': trial.suggest_float('reg_lambda', 1e-2, 10.0, log=True),
+
+            # Histogram binning — impacts performance and speed tradeoff
+            'max_bin': trial.suggest_int('max_bin', 16, 256),
+
+            # Grow policy and conditional leaves — adds flexibility
+            'grow_policy': trial.suggest_categorical('grow_policy', ['depthwise', 'lossguide']),
+            # Note: you can conditionally add max_leaves if grow_policy == 'lossguide'
+
+            # n_estimators here corresponds to num_boost_round in native API
+            'n_estimators': trial.suggest_int('n_estimators', 100, 300),
+
+            # Random seed for reproducibility
             'seed': random_state
         }
