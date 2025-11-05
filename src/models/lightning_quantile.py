@@ -98,9 +98,8 @@ class LightningQuantileModel(BaseModel):
         "dropout": 0.2,
         "max_epochs": 50,
         "batch_size": 64,
-        "num_workers": 0,  # Conservative default for compatibility
         "random_state": 42
-        # Note: accelerator is hardcoded to 'cpu' for parallel training compatibility
+        # Note: Resource parameters (num_workers, accelerator, devices) are now passed via tuning_config
     }
     REQUIRES_QUANTILE = True
     
@@ -234,14 +233,16 @@ class LightningQuantileModel(BaseModel):
         # Create trainer with minimal configuration for compatibility
         trainer_kwargs = {
             "max_epochs": max_epochs,
-            "log_every_n_steps": max(10, len(train_loader) // 5),  # Adaptive logging
-            "enable_checkpointing": False,  # Disable checkpointing for simplicity
-            "logger": False,  # Disable logging for cleaner output
-            "enable_progress_bar": False,  # Disable progress bar for cleaner output
-            "accelerator": "cpu",  # CPU-only for parallel training compatibility
-            "strategy": "auto",  # Single-process strategy
-            "enable_model_summary": False  # Reduce output verbosity
+            "log_every_n_steps": max(10, len(train_loader) // 5),
+            "enable_checkpointing": False,
+            "logger": False,
+            "enable_progress_bar": False,
+            "accelerator": self.model_params.get('accelerator', 'cpu'),
+            "devices": self.model_params.get('devices', 1),
+            "strategy": "auto",
+            "enable_model_summary": False
         }
+
         
         # Add any additional trainer kwargs from training_kwargs
         trainer_kwargs.update(training_kwargs.get("trainer_kwargs", {}))
@@ -425,8 +426,7 @@ class LightningQuantileModel(BaseModel):
             'dropout': trial.suggest_float('dropout', 0.0, 0.5),
             'max_epochs': trial.suggest_int('max_epochs', 10, 30),
             'batch_size': trial.suggest_categorical('batch_size', [32, 64, 128, 256]),
-            'random_state': random_state,
-            'accelerator': 'cpu',  # CPU-only for parallel training compatibility
-            'num_workers': 4  # Parallel data loading with 4 workers
+            'random_state': random_state
+            # Note: Resource params (accelerator, devices, num_workers) now passed via tuning_config
         }
                 

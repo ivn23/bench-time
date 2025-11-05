@@ -247,15 +247,174 @@ results = pipeline.run_experiment(
 - **Set nthread=1**: For XGBoost in hyperparameters (automatically enforced in parallel mode)
 - **Memory management**: Monitor RAM usage with large SKU counts (35k SKUs ≈ 50GB dataset memory)
 
-## 12. Performance Tips
+## 12. Resource Configuration and Parallelism
+
+The framework supports three independent types of parallelism that serve different purposes. Understanding these is crucial for optimal performance configuration.
+
+### Three Types of Parallelism
+
+#### 1. Optuna Trial Parallelism (`n_jobs`)
+**What it controls**: Number of hyperparameter trials running simultaneously
+
+**Configuration**: Set in `tuning_config['n_jobs']`
+
+**When to use**:
+- `n_jobs=1`: Sequential trials (use for GPU models - each trial needs exclusive GPU access)
+- `n_jobs=-1`: All CPU cores (use for CPU models like XGBoost)
+- `n_jobs=N`: N parallel trials (requires N GPUs with proper CUDA_VISIBLE_DEVICES setup)
+
+**Example**: With `n_jobs=4`, Optuna runs 4 different hyperparameter combinations simultaneously
+
+#### 2. DataLoader Worker Parallelism (`dataloader_workers`)
+**What it controls**: Number of processes loading/preprocessing data in parallel while GPU trains
+
+**Configuration**: Set in `tuning_config['dataloader_workers']`
+
+**When to use**:
+- `dataloader_workers=0`: Single-threaded (slow, but simple for debugging)
+- `dataloader_workers=4-8`: Good default for GPU training
+- `dataloader_workers=8-12`: Optimal for large datasets (>400k samples) on GPU
+
+**Example**: With `dataloader_workers=8`, 8 processes load batches in parallel while GPU computes gradients
+
+#### 3. GPU Device Parallelism (`devices`)
+**What it controls**: Number of GPUs used for training a single model via Distributed Data Parallel (DDP)
+
+**Configuration**: Set in `tuning_config['devices']`
+
+**How it works**:
+- Model is replicated on each GPU
+- Training data is split across GPUs (each GPU sees different batches)
+- Gradients are synchronized after each backward pass
+
+**When to use**:
+- `devices=1`: Single GPU per trial (**recommended for hyperparameter tuning**)
+- `devices=N`: Use N GPUs for one large model (not typical for hyperparameter tuning)
+
+**Example**: With `devices=4`, one model trains on 4 GPUs simultaneously using DDP
+
+### Resource Configuration via tuning_config
+
+All resource parameters are now passed through the `tuning_config` dictionary:
+
+```python
+tuning_config = {
+    # Hyperparameter search configuration
+    'n_trials': 100,           # Number of hyperparameter combinations to try
+    'n_folds': 5,              # Cross-validation folds per trial
+
+    # Resource configuration (NEW)
+    'n_jobs': 1,               # Optuna trial parallelism
+    'dataloader_workers': 8,   # DataLoader worker processes
+    'accelerator': 'cuda',     # Device type: 'cuda', 'cpu', or 'mps'
+    'devices': 1               # Number of GPUs per trial
+}
+
+pipeline.run_experiment(
+    sku_tuples=sku_list,
+    modeling_strategy=ModelingStrategy.COMBINED,
+    model_type="lightning_quantile",
+    mode="hp_tune",
+    tuning_config=tuning_config
+)
+```
+
+### Common Configuration Scenarios
+
+#### Single GPU Hyperparameter Tuning (Typical)
+```python
+tuning_config = {
+    'n_trials': 100,
+    'n_folds': 5,
+    'n_jobs': 1,               # Sequential trials
+    'dataloader_workers': 8,   # Parallel data loading
+    'accelerator': 'cuda',
+    'devices': 1               # One GPU per trial
+}
+```
+
+**What happens**: Trials run one at a time, each using 1 GPU with 8 data loading workers
+
+#### CPU-Only Training
+```python
+tuning_config = {
+    'n_trials': 100,
+    'n_folds': 5,
+    'n_jobs': -1,              # Parallel trials on all CPU cores
+    'dataloader_workers': 4,   # Lower for CPU
+    'accelerator': 'cpu',
+    'devices': 1
+}
+```
+
+**What happens**: Multiple trials run in parallel across CPU cores
+
+#### Multi-GPU Hyperparameter Tuning (Advanced)
+Run multiple scripts in parallel, each on a different GPU:
+```bash
+# Terminal 1 - GPU 0
+CUDA_VISIBLE_DEVICES=0 python run_hpt_mlp.py &
+
+# Terminal 2 - GPU 1
+CUDA_VISIBLE_DEVICES=1 python run_hpt_mlp.py &
+```
+
+With shared Optuna storage (SQLite/PostgreSQL), each GPU runs independent trials
+
+### Auto-Detection
+
+The `run_hpt_mlp.py` script automatically detects available GPUs and configures optimal defaults:
+
+```python
+if torch.cuda.is_available():
+    accelerator = 'cuda'
+    devices = 1
+    dataloader_workers = 8
+else:
+    accelerator = 'cpu'
+    devices = 1
+    dataloader_workers = 4
+```
+
+You can override these by explicitly setting values in `tuning_config`
+
+### For Your Use Case: Tuning One Global Model Across 100 SKUs
+
+**Scenario**: Combined model across all SKUs, hyperparameter tuning on GPU
+
+**Configuration**:
+```python
+tuning_config = {
+    'n_trials': 100,           # Try 100 hyperparameter combinations
+    'n_folds': 5,              # 5-fold CV per trial
+    'n_jobs': 1,               # Sequential trials (GPU needs exclusive access)
+    'dataloader_workers': 8,   # 8 workers load data while GPU trains
+    'accelerator': 'cuda',     # Use GPU
+    'devices': 1               # Each trial uses 1 GPU
+}
+```
+
+**What happens**:
+1. Optuna tries 100 hyperparameter combinations **sequentially** (one at a time)
+2. Each trial trains a Lightning model on your combined dataset (all 100 SKUs together)
+3. Model training uses **1 GPU** with **8 DataLoader workers** for fast data loading
+4. No multi-GPU parallelization within a trial (`devices=1`)
+
+**Why these settings**:
+- `n_jobs=1`: GPU training is fast; parallel trials would cause GPU memory contention
+- `dataloader_workers=8`: Keeps GPU fed with data (prevents GPU idling)
+- `devices=1`: Hyperparameter tuning benefits from many trials, not parallel model training
+
+## 13. Performance Tips
 
 - **Use lazy evaluation** with `load_data(lazy=True)` for memory efficiency
 - **Process SKU batches** for large-scale experiments
 - **Configure fewer estimators** during development (n_estimators=50)
 - **Leverage parallel training** for INDIVIDUAL strategy with XGBoost models (automatic)
-- **Enable GPU training** for Lightning models when available
+- **Enable GPU training** for Lightning models by setting `accelerator='cuda'` in `tuning_config`
+- **Optimize DataLoader workers** based on dataset size (8-12 for large datasets on GPU)
 
-## 13. Further Reading
+## 14. Further Reading
 
 - **Architecture Details**: See Single Responsibility Principle analysis in conversation logs
 - **Model Implementation**: Review [src/models/](src/models/) for specific implementations

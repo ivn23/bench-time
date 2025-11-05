@@ -75,17 +75,25 @@ class HyperparameterTuner:
     ModelingDataset objects using only training data for CV-based optimization.
     """
 
-    def __init__(self, random_state: int, n_jobs: int = 1):
+    def __init__(self, random_state: int, n_jobs: int = 1,
+                 dataloader_workers: int = 4, accelerator: str = 'cpu', devices: int = 1):
         """Initialize the tuner.
 
         Args:
             random_state: Random seed for reproducibility
             n_jobs: Number of parallel Optuna trials (1=sequential, >1=parallel, -1=all cores)
+            dataloader_workers: Number of DataLoader worker processes for parallel data loading
+            accelerator: Device type for training ('cpu', 'cuda', 'mps')
+            devices: Number of GPU devices to use for training (typically 1 for hyperparameter tuning)
         """
         self.random_state = random_state
         self.n_jobs = n_jobs
+        self.dataloader_workers = dataloader_workers
+        self.accelerator = accelerator
+        self.devices = devices
         logger.info(f"HyperparameterTuner initialized with random_state={random_state}")
         logger.info(f"Optuna parallelism: {self.n_jobs} jobs ({'sequential' if n_jobs == 1 else 'parallel'})")
+        logger.info(f"Resource configuration: accelerator={accelerator}, devices={devices}, dataloader_workers={dataloader_workers}")
 
     def tune(self,
              dataset: ModelingDataset,
@@ -242,6 +250,11 @@ class HyperparameterTuner:
             try:
                 # Get hyperparameters for this trial
                 params = self._get_search_space(trial, model_type)
+
+                # Add resource configuration parameters (not tuned, fixed for all trials)
+                params['num_workers'] = self.dataloader_workers
+                params['accelerator'] = self.accelerator
+                params['devices'] = self.devices
 
                 logger.info(f"Trial {trial.number} started with params: {params}")
 

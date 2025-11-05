@@ -343,8 +343,15 @@ class BenchmarkPipeline:
         n_trials = config.get('n_trials', 50)
         n_folds = config.get('n_folds', 3)
         n_jobs = config.get('n_jobs', 1)
+
+        # Extract resource configuration parameters
+        dataloader_workers = config.get('dataloader_workers', 4)
+        accelerator = config.get('accelerator', 'cpu')
+        devices = config.get('devices', 1)
+
         logger.info(f"Tuning configuration: {n_trials} trials, {n_folds} CV folds, {n_jobs} parallel jobs")
-        
+        logger.info(f"Resource configuration: accelerator={accelerator}, devices={devices}, dataloader_workers={dataloader_workers}")
+
         # Step 4: Handle quantile models (tune for first quantile only)
         quantile_alpha = quantile_alphas[0] if quantile_alphas else None
         if quantile_alphas and len(quantile_alphas) > 1:
@@ -353,9 +360,15 @@ class BenchmarkPipeline:
                 f"tuning for alpha={quantile_alpha} only. "
                 f"Hyperparameters are quantile-agnostic and will work for all quantiles."
             )
-        
+
         # Step 5: Run hyperparameter optimization
-        tuner = HyperparameterTuner(random_state=random_state, n_jobs=n_jobs)
+        tuner = HyperparameterTuner(
+            random_state=random_state,
+            n_jobs=n_jobs,
+            dataloader_workers=dataloader_workers,
+            accelerator=accelerator,
+            devices=devices
+        )
         result = tuner.tune(
             dataset=tuning_dataset,
             model_type=model_type,
