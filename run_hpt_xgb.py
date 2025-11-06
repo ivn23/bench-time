@@ -1,9 +1,7 @@
 import sys
 from pathlib import Path
 import numpy as np
-import polars as pl
-import time
-from datetime import date
+import time 
 
 current_dir = Path.cwd()
 if str(current_dir) not in sys.path:
@@ -12,51 +10,67 @@ if str(current_dir) not in sys.path:
 from src import (
     DataConfig, ModelingStrategy, BenchmarkPipeline
 )
+from src.utils import save_hp_tuning_results, get_skus
 
 import torch
 torch.set_num_threads(1)
 np.random.seed(42)
 
 
+
 data_path = "data/db_snapshot_offsite/train_data/processed/train_data_features.feather"
-df_clean = pl.read_ipc(data_path)
+mapping_path = 'data/feature_mapping_train.pkl'
+target_path = "data/db_snapshot_offsite/train_data/train_data/train_data_target.feather"
+split_date="2016-01-01"
 
-sku_tuples_all = [(d['productID'], d['storeID']) for d in df_clean.select(pl.col("productID"), pl.col("storeID")).unique().to_dicts()]
+model_type = "xgboost_quantile"
+quantile = [0.7]
+tune_on = 10
 
-sku_exclude = (df_clean
- .group_by("storeID","productID")
- .agg(pl.col("date").first())
- .filter(pl.col("date") >= date(2016,1,1))
- .select("productID","storeID")
- )
+n_trials = 10
+n_folds = 5
+n_jobs = -1
 
-sku_exclude = [(d['productID'], d['storeID']) for d in sku_exclude.select(pl.col("productID"), pl.col("storeID")).unique().to_dicts()]
-
-sku_tuples_complete =  [sku for sku in sku_tuples_all if sku not in sku_exclude]
+sku_tuples_complete = get_skus(data_path)
 
 data_config = DataConfig(
-    mapping_path = 'data/feature_mapping_train.pkl',
-    features_path = "data/db_snapshot_offsite/train_data/processed/train_data_features.feather",
-    target_path = "data/db_snapshot_offsite/train_data/train_data/train_data_target.feather",
-    split_date="2016-01-01",
+    mapping_path = mapping_path,
+    features_path = data_path,
+    target_path = target_path,
+    split_date=split_date
 )
 
 pipeline = BenchmarkPipeline(data_config)
 
 start_time = time.time()
-# Step 1: Tune hyperparameters
+# Tune hyperparameters
 tune_result = pipeline.run_experiment(
     sku_tuples=sku_tuples_complete,
     modeling_strategy=ModelingStrategy.COMBINED,
-    model_type="xgboost_quantile",
-    quantile_alphas=[0.7],
+    model_type=model_type,
+    quantile_alphas=quantile,
     mode="hp_tune",
-    tune_on= 100,
-    tuning_config={'n_trials': 100, 'n_folds': 5, 'n_jobs': -1},
+    tune_on= tune_on,
+    tuning_config={'n_trials': n_trials, 'n_folds': n_folds, 'n_jobs': n_jobs},
 )
 
 end_time = time.time()
 execution_time = end_time - start_time
-print("score: ",tune_result.best_score)
-print("params: ",tune_result.best_params)
-print(f"Execution time: {execution_time} seconds")
+minutes = int(execution_time // 60)
+seconds = execution_time % 60
+
+# Save results to CSV 
+saved_path = save_hp_tuning_results(
+    tune_result=tune_result,
+    model_type=model_type,
+    quantile_alpha=quantile[0] if quantile else None,
+    tune_on=tune_on,
+    n_trials=n_trials,
+    n_folds=5,
+    execution_time=execution_time
+)
+
+print(f"Results saved to: {saved_path}")
+print(f"Best Validation Score: {tune_result.best_score:.6f}")
+print(f"Execution Time: {minutes}m {seconds:.1f}s")
+

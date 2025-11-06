@@ -1,9 +1,7 @@
 import sys
 from pathlib import Path
 import numpy as np
-import polars as pl
 import time
-from datetime import date
 
 current_dir = Path.cwd()
 if str(current_dir) not in sys.path:
@@ -12,6 +10,7 @@ if str(current_dir) not in sys.path:
 from src import (
     DataConfig, ModelingStrategy, BenchmarkPipeline
 )
+from src.utils import save_hp_tuning_results, get_skus
 
 import torch
 import warnings
@@ -47,21 +46,9 @@ else:
 np.random.seed(42)
 
 
+# Load and filter SKU tuples
 data_path = "data/db_snapshot_offsite/train_data/processed/train_data_features.feather"
-df_clean = pl.read_ipc(data_path)
-
-sku_tuples_all = [(d['productID'], d['storeID']) for d in df_clean.select(pl.col("productID"), pl.col("storeID")).unique().to_dicts()]
-
-sku_exclude = (df_clean
- .group_by("storeID","productID")
- .agg(pl.col("date").first())
- .filter(pl.col("date") >= date(2016,1,1))
- .select("productID","storeID")
-)
-
-sku_exclude = [(d['productID'], d['storeID']) for d in sku_exclude.select(pl.col("productID"), pl.col("storeID")).unique().to_dicts()]
-
-sku_tuples_complete =  [sku for sku in sku_tuples_all if sku not in sku_exclude]
+sku_tuples_complete = get_skus(data_path)
 
 data_config = DataConfig(
     mapping_path = 'data/feature_mapping_train.pkl',
@@ -93,6 +80,24 @@ tune_result = pipeline.run_experiment(
 
 end_time = time.time()
 execution_time = end_time - start_time
-print("score: ",tune_result.best_score)
-print("params: ",tune_result.best_params)
-print(f"Execution time: {execution_time} seconds")
+
+# Save results to CSV for easy loading and reuse
+saved_path = save_hp_tuning_results(
+    tune_result=tune_result,
+    model_type="lightning_quantile",
+    quantile_alpha=0.7,
+    tune_on=100,
+    n_trials=100,
+    n_folds=5,
+    execution_time=execution_time
+)
+
+print(f"\n✓ Results saved to: {saved_path}")
+print(f"Best Validation Score: {tune_result.best_score:.6f}")
+print(f"Execution Time: {execution_time:.2f} seconds")
+print("\nBest Hyperparameters:")
+for param_name, param_value in tune_result.best_params.items():
+    if isinstance(param_value, float):
+        print(f"  {param_name}: {param_value:.6f}")
+    else:
+        print(f"  {param_name}: {param_value}")
