@@ -21,40 +21,23 @@ if str(current_dir) not in sys.path:
     sys.path.insert(0, str(current_dir))
 
 from src import (
-    DataConfig, ModelingStrategy, ReleaseManager, BenchmarkPipeline
+    DataConfig, ModelingStrategy, BenchmarkPipeline
 )
-from datetime import date
-from lets_plot import *
+from src.utils import get_skus
 
-LetsPlot.setup_html()
 np.random.seed(42)
 
 
 def main():
-    """Main execution function for macOS multiprocessing compatibility."""
-    logger.info("="*80)
-    logger.info("Starting XGBoost Hyperparameter Experiment")
-    logger.info("="*80)
 
-    #get list of trainable SKUs
-    data_path = "/Users/ivn/Documents/PhD/Transformer Research/Code/Benchmarking/data/db_snapshot_offsite/train_data/processed/train_data_features.feather"
-    df_clean = pl.read_ipc(data_path)
+    # Centralized data path definitions
+    data_path = "data/db_snapshot_offsite/train_data/processed/train_data_features.feather"
+    mapping_path = 'data/feature_mapping_train.pkl'
+    target_path = "data/db_snapshot_offsite/train_data/train_data/train_data_target.feather"
+    split_date = "2016-01-01"
 
-    sku_tuples_all = [(d['productID'], d['storeID']) for d in df_clean.select(pl.col("productID"), pl.col("storeID")).unique().to_dicts()]
-    print("total unseen skus: ", len(sku_tuples_all))
-
-    sku_exclude = (df_clean
-     .group_by("storeID","productID")
-     .agg(pl.col("date").first())
-     .filter(pl.col("date") >= date(2016,1,1))
-     .select("productID","storeID")
-     )
-
-    sku_exclude = [(d['productID'], d['storeID']) for d in sku_exclude.select(pl.col("productID"), pl.col("storeID")).unique().to_dicts()]
-
-    sku_tuples_complete =  [sku for sku in sku_tuples_all if sku not in sku_exclude]
-    print("total unseen skus available for training: ", len(sku_tuples_complete))
-    logger.info(f"Total SKUs available for training: {len(sku_tuples_complete)}")
+    # Load SKUs
+    sku_tuples_complete = get_skus(data_path)
 
 
     #Parameter from runs over 500 and over 1000 SKUs  each on 100 trials and 5 folds
@@ -80,7 +63,7 @@ def main():
         "sampling_method": "uniform",  # data sampling method
         "refresh_leaf": 1,             # whether to refresh leaf values after each boosting step
         "device": "cpu",               # or 'cuda' if available
-        "nthread": -1,                  # number of CPU threads
+        "nthread": 1,                  # number of CPU threads
         "verbosity": 1, 
         "n_estimators": 500              # log level
     }
@@ -94,28 +77,24 @@ def main():
                   'reg_alpha': 1.1594541493594819,
                   'reg_lambda': 9.001210122377953,
                   'n_estimators': 168,
-                  'nthread': -1,
+                  'nthread': 1,
                   'tree_method': 'hist'}
 
 
     hp_list = [xgb_params]
     quantiles = [0.5, 0.7, 0.9, 0.95, 0.99]
 
+    # Configure data
     data_config = DataConfig(
-        mapping_path = 'data/feature_mapping_train.pkl',
-        features_path = "/Users/ivn/Documents/PhD/Transformer Research/Code/Benchmarking/data/db_snapshot_offsite/train_data/processed/train_data_features.feather",
-        target_path = "/Users/ivn/Documents/PhD/Transformer Research/Code/Benchmarking/data/db_snapshot_offsite/train_data/train_data/train_data_target.feather",
-        split_date="2016-01-01",
+        mapping_path=mapping_path,
+        features_path=data_path,
+        target_path=target_path,
+        split_date=split_date
     )
 
     experiments= []
-    logger.info(f"Starting {len(hp_list)} experiments with {len(quantiles)} quantiles each")
-    logger.info(f"Training on {len(sku_tuples_complete)} SKUs with INDIVIDUAL strategy")
 
     for i, hp in enumerate(hp_list, start=1):
-        logger.info("="*80)
-        logger.info(f"EXPERIMENT {i}/{len(hp_list)}: Starting training with hyperparameters set {i}")
-        logger.info("="*80)
 
         pipeline = BenchmarkPipeline(data_config)
 
@@ -131,8 +110,6 @@ def main():
         )
 
         experiments.append([hp,results])
-        logger.info(f"✓ Completed experiment {i}/{len(hp_list)}")
-        logger.info(f"  Trained {results.num_models} models across {len(quantiles)} quantiles")
         print(f"Completed experiment {i}")
 
 
@@ -157,14 +134,8 @@ def main():
 
     experiment_results = pl.concat(results_dfs, how="vertical")
 
-    logger.info("="*80)
-    logger.info("Saving results to myexp.csv")
     experiment_results.write_csv("xgb_quantile_hp_all_magnus_params.csv", separator=",", include_header=True)
-    logger.info(f"✓ Results saved: {len(experiment_results)} rows")
-    logger.info("="*80)
-    logger.info("ALL EXPERIMENTS COMPLETED SUCCESSFULLY")
-    logger.info("="*80)
-
+ 
 
 if __name__ == "__main__":
     main()

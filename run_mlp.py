@@ -45,39 +45,28 @@ if str(current_dir) not in sys.path:
 from src import (
     DataConfig, ModelingStrategy, BenchmarkPipeline
 )
-from datetime import date
-from lets_plot import *
+from src.utils import get_skus
 
-LetsPlot.setup_html()
 np.random.seed(42)
 
 def main():
+    # Centralized data path definitions
+    data_path = "data/db_snapshot_offsite/train_data/processed/train_data_features.feather"
+    mapping_path = 'data/feature_mapping_train.pkl'
+    target_path = "data/db_snapshot_offsite/train_data/train_data/train_data_target.feather"
+    split_date = "2016-01-01"
 
-    #get list of trainable SKUs
-    data_path = "/Users/ivn/Documents/PhD/Transformer Research/Code/Benchmarking/data/db_snapshot_offsite/train_data/processed/train_data_features.feather"
-    df_clean = pl.read_ipc(data_path)
+    # Load SKUs
+    sku_tuples_complete = get_skus(data_path)
+    print("Total SKUs available for training:", len(sku_tuples_complete))
 
-    sku_tuples_all = [(d['productID'], d['storeID']) for d in df_clean.select(pl.col("productID"), pl.col("storeID")).unique().to_dicts()]
-    print("total unseen skus: ", len(sku_tuples_all))
 
-    sku_exclude = (df_clean
-    .group_by("storeID","productID")
-    .agg(pl.col("date").first())
-    .filter(pl.col("date") >= date(2016,1,1))
-    .select("productID","storeID")
-    )
-
-    sku_exclude = [(d['productID'], d['storeID']) for d in sku_exclude.select(pl.col("productID"), pl.col("storeID")).unique().to_dicts()]
-
-    sku_tuples_complete =  [sku for sku in sku_tuples_all if sku not in sku_exclude]
-    print("total unseen skus available for training: ", len(sku_tuples_complete))
-    logger.info(f"Total SKUs available for training: {len(sku_tuples_complete)}")
-    print(sku_tuples_complete[:1])
+    # Configure data
     data_config = DataConfig(
-        mapping_path = 'data/feature_mapping_train.pkl',
-        features_path = "/Users/ivn/Documents/PhD/Transformer Research/Code/Benchmarking/data/db_snapshot_offsite/train_data/processed/train_data_features.feather",
-        target_path = "/Users/ivn/Documents/PhD/Transformer Research/Code/Benchmarking/data/db_snapshot_offsite/train_data/train_data/train_data_target.feather",
-        split_date="2016-01-01",
+        mapping_path=mapping_path,
+        features_path=data_path,
+        target_path=target_path,
+        split_date=split_date
     )
 
     quantiles = [0.5, 0.7, 0.9, 0.95, 0.99]
@@ -92,10 +81,6 @@ def main():
         experiment_name="mlp_quantile",
         evaluate_on_test=True
     )
-
-
-
-    logger.info(f"  Trained {results.num_models} models across {len(quantiles)} quantiles")
 
 
     #combine results into one dataframe for easier processing
