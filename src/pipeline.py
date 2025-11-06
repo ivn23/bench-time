@@ -380,8 +380,8 @@ class BenchmarkPipeline:
 
         # Step 3: Setup tuning configuration
         config = tuning_config or {}
-        n_trials = config.get('n_trials', 50)
-        n_folds = config.get('n_folds', 3)
+        n_trials = config.get('n_trials', 100)
+        n_folds = config.get('n_folds', 5)
         n_jobs = config.get('n_jobs', 1)
 
         # Extract resource configuration parameters

@@ -149,25 +149,7 @@ def save_hp_tuning_results(
 
 
 def load_hp_tuning_results(filepath: Union[str, Path]) -> Dict[str, Any]:
-    """
-    Load hyperparameter tuning results from CSV and convert to dict.
 
-    Args:
-        filepath: Path to the CSV file saved by save_hp_tuning_results()
-
-    Returns:
-        Dictionary of hyperparameters ready for pipeline.run_experiment()
-
-    Example:
-        >>> best_params = load_hp_tuning_results("HP_RESULTS/xgb/xgboost_quantile_q0.7_tuned100_trials100_20251106_143022.csv")
-        >>> pipeline.run_experiment(
-        ...     sku_tuples=all_skus,
-        ...     modeling_strategy=ModelingStrategy.COMBINED,
-        ...     model_type="xgboost_quantile",
-        ...     quantile_alphas=[0.7],
-        ...     hyperparameters=best_params
-        ... )
-    """
     # Read CSV
     df = pd.read_csv(filepath)
 
@@ -190,6 +172,20 @@ def load_hp_tuning_results(filepath: Union[str, Path]) -> Dict[str, Any]:
             params[key] = bool(value) if isinstance(value, bool) else str(value).lower() == 'true'
         else:
             params[key] = str(value)
+
+    default_params = {
+        "sampling_method": "uniform",
+        "refresh_leaf": 1,
+        "device": "cpu",
+        "nthread": 1,
+        "verbosity": 1,
+        "num_parallel_tree": 1,
+        "tree_method": params.get("tree_method", "hist"),  # keep if tuned, else set default
+    }
+
+        # Merge defaults without overwriting tuned values
+    for k, v in default_params.items():
+        params.setdefault(k, v)
 
     return params
 

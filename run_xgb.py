@@ -23,7 +23,7 @@ if str(current_dir) not in sys.path:
 from src import (
     DataConfig, ModelingStrategy, BenchmarkPipeline
 )
-from src.utils import get_skus
+from src.utils import get_skus, load_hp_tuning_results
 
 np.random.seed(42)
 
@@ -35,50 +35,12 @@ def main():
     mapping_path = 'data/feature_mapping_train.pkl'
     target_path = "data/db_snapshot_offsite/train_data/train_data/train_data_target.feather"
     split_date = "2016-01-01"
+    param_path = "/Users/ivn/Documents/PhD/Transformer Research/Code/Benchmarking/HP_RESULTS/xgb/xgboost_quantile_q0.7_tuned10_trials10_20251106_163806.csv"
 
     # Load SKUs
     sku_tuples_complete = get_skus(data_path)
 
-
-    #Parameter from runs over 500 and over 1000 SKUs  each on 100 trials and 5 folds
-
-    # Magnus parameter
-    xgb_params = {
-        "eta": 0.3,                    # learning rate
-        "max_depth": 2,                # tree depth
-        "min_child_weight": 5,         # minimum sum of instance weight (hessian) in a child
-        "subsample": 0.9,              # fraction of samples per tree
-        "colsample_bytree": 0.85,      # fraction of features per tree
-        "colsample_bylevel": 0.9,      # fraction of features per tree level
-        "colsample_bynode": 0.9,       # fraction of features per split
-        "gamma": 1,                    # minimum loss reduction required to make a split
-        "reg_alpha": 4,                # L1 regularization term on weights
-        "reg_lambda": 0.5,             # L2 regularization term on weights
-        "max_bin": 512,                # number of bins for histogram-based algorithms
-        "max_leaves": 7,               # maximum number of leaves (used with grow_policy='lossguide')
-        "max_delta_step": 5,           # limit step size for each leaf weight update
-        "tree_method": "auto",         # can be 'auto', 'hist', 'approx', 'gpu_hist'
-        "grow_policy": "depthwise",    # 'depthwise' or 'lossguide'
-        "num_parallel_tree": 1,        # used for random forest or DART       
-        "sampling_method": "uniform",  # data sampling method
-        "refresh_leaf": 1,             # whether to refresh leaf values after each boosting step
-        "device": "cpu",               # or 'cuda' if available
-        "nthread": 1,                  # number of CPU threads
-        "verbosity": 1, 
-        "n_estimators": 500              # log level
-    }
-
-    hp_100_new_2 = {'eta': 0.11498210032794669,
-                  'max_depth': 10,
-                  'min_child_weight': 24,
-                  'subsample': 0.9457013763068587,
-                  'colsample_bytree': 0.736173526683077,
-                  'gamma': 0.5391072234743155,
-                  'reg_alpha': 1.1594541493594819,
-                  'reg_lambda': 9.001210122377953,
-                  'n_estimators': 168,
-                  'nthread': 1,
-                  'tree_method': 'hist'}
+    xgb_params = load_hp_tuning_results(param_path)
 
 
     hp_list = [xgb_params]
@@ -99,13 +61,13 @@ def main():
         pipeline = BenchmarkPipeline(data_config)
 
         results = pipeline.run_experiment(
-            sku_tuples= sku_tuples_complete,
+            sku_tuples= sku_tuples_complete[:100],
             modeling_strategy=ModelingStrategy.INDIVIDUAL,
             model_type="xgboost_quantile",
             quantile_alphas=quantiles,
             hyperparameters = hp,
             experiment_name=f"xgb_quantile_{i}",
-            data_workers=8,
+            data_workers=4,
             evaluate_on_test=True
         )
 
@@ -114,7 +76,7 @@ def main():
 
 
     #give results quick hp_name for later processing
-    hp_type = ["100_new_2"]
+    hp_type = ["test_hp"]
     for i,experiment in enumerate(experiments, start=0):
         experiment.append(hp_type[i])
 
@@ -134,7 +96,7 @@ def main():
 
     experiment_results = pl.concat(results_dfs, how="vertical")
 
-    experiment_results.write_csv("xgb_quantile_hp_all_magnus_params.csv", separator=",", include_header=True)
+    experiment_results.write_csv("xgb_test_params.csv", separator=",", include_header=True)
  
 
 if __name__ == "__main__":

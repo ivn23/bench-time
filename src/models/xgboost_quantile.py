@@ -151,47 +151,28 @@ class XGBoostQuantileModel(BaseModel):
 
     @staticmethod
     def get_search_space(trial, random_state: int) -> Dict[str, Any]:
-        """
-        Define hyperparameter search space for XGBoost quantile model.
+        params = {
+                'eta': trial.suggest_float('eta', 0.01, 0.2, log=True),
+                'max_depth': trial.suggest_int('max_depth', 2, 6),
+                'min_child_weight': trial.suggest_float('min_child_weight', 0.1, 10.0, log=True),
+                'subsample': trial.suggest_float('subsample', 0.6, 1.0),
+                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 1.0),
+                'colsample_bylevel': trial.suggest_float('colsample_bylevel', 0.5, 1.0),
+                'colsample_bynode': trial.suggest_float('colsample_bynode', 0.5, 1.0),
+                'gamma': trial.suggest_float('gamma', 0.0, 5.0),
+                'reg_alpha': trial.suggest_float('reg_alpha', 1e-3, 10.0, log=True),
+                'reg_lambda': trial.suggest_float('reg_lambda', 1e-2, 10.0, log=True),
+                'max_bin': trial.suggest_int('max_bin', 16, 256),
+                'grow_policy': trial.suggest_categorical('grow_policy', ['depthwise', 'lossguide']),
+                'tree_method': trial.suggest_categorical('tree_method', ['hist', 'approx']),
+                'max_delta_step': trial.suggest_int('max_delta_step', 0, 10),
+                'num_boost_round': trial.suggest_int('num_boost_round', 100, 300),
+                'seed': random_state,
+                'sampling_method': 'uniform'
+            }
 
-        Args:
-            trial: Optuna trial object for suggesting hyperparameters
-            random_state: Random seed for reproducibility
+            # Conditional parameter
+        if params['grow_policy'] == 'lossguide':
+                params['max_leaves'] = trial.suggest_int('max_leaves', 4, 64)
 
-        Returns:
-            Dictionary of hyperparameters sampled from the search space
-        """
-        return {
-            # Learning rate: log scale, smaller is safer for stability on small data
-            'eta': trial.suggest_float('eta', 0.01, 0.2, log=True),
-
-            # Tree complexity: small range, shallow trees for few samples
-            'max_depth': trial.suggest_int('max_depth', 2, 6),
-
-            # Regularization on minimum child weight: controls overfitting on tiny leaves
-            'min_child_weight': trial.suggest_float('min_child_weight', 0.1, 10.0, log=True),
-
-            # Sampling parameters: prevent overfitting, stable ranges
-            'subsample': trial.suggest_float('subsample', 0.6, 1.0),
-            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 1.0),
-
-            # Split regularization: discourages small gain splits
-            'gamma': trial.suggest_float('gamma', 0.0, 5.0),
-
-            # L1 / L2 regularization: log scale, large variation allowed
-            'reg_alpha': trial.suggest_float('reg_alpha', 1e-3, 10.0, log=True),
-            'reg_lambda': trial.suggest_float('reg_lambda', 1e-2, 10.0, log=True),
-
-            # Histogram binning — impacts performance and speed tradeoff
-            'max_bin': trial.suggest_int('max_bin', 16, 256),
-
-            # Grow policy and conditional leaves — adds flexibility
-            'grow_policy': trial.suggest_categorical('grow_policy', ['depthwise', 'lossguide']),
-            # Note: you can conditionally add max_leaves if grow_policy == 'lossguide'
-
-            # n_estimators here corresponds to num_boost_round in native API
-            'n_estimators': trial.suggest_int('n_estimators', 100, 300),
-
-            # Random seed for reproducibility
-            'seed': random_state
-        }
+        return params
